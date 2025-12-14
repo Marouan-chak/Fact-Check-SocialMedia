@@ -102,6 +102,16 @@ function setText(el, text) {
   el.textContent = text ?? "";
 }
 
+function formatTranscript(text) {
+  const raw = String(text ?? "");
+  if (!raw) return "";
+
+  // Backwards compatibility: older runs stored chunk labels like "[Part 1/3]".
+  const withoutPartHeaders = raw.replace(/^\s*\[?\s*part\s+\d+\s*\/\s*\d+\s*\]?\s*$/gim, "");
+
+  return withoutPartHeaders.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function isRtlLanguage(code) {
   return RTL_LANGS.has(String(code || "").toLowerCase());
 }
@@ -496,7 +506,7 @@ function renderResult(job) {
   setSources(els.sourcesList, job.report?.sources_used || []);
 
   renderClaims(job.report?.claims || []);
-  els.transcript.textContent = job.transcript || "";
+  els.transcript.textContent = formatTranscript(job.transcript || "");
 }
 
 function openLangMenu() {

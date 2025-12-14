@@ -81,6 +81,7 @@ class AnalyzeRequest(BaseModel):
 
 JobStatus = Literal[
     "queued",
+    "fetching_transcript",
     "downloading",
     "transcribing",
     "fact_checking",

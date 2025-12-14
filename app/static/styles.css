@@ -380,6 +380,11 @@ li { margin: 6px 0; color: var(--text); }
   border-radius: 12px;
   padding: 12px;
   overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-family: inherit;
+  max-height: 60vh;
 }
 
 .hidden { display: none; }

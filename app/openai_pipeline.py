@@ -366,7 +366,7 @@ def transcribe_audio_mp3(mp3_path: Path) -> str:
         text = (results.get(idx) or "").strip()
         if not text:
             continue
-        chunks.append(f"[Part {idx}/{total}]\n{text}")
+        chunks.append(text)
 
     return "\n\n".join(chunks).strip()
 

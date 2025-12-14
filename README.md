@@ -1,13 +1,13 @@
 # Fact-Check Social Media
 End-to-end platform to fact-check social media video audio (Instagram, YouTube, X, etc.):
-1) download audio via `yt-dlp` → 2) transcribe with `gpt-4o-transcribe` → 3) fact-check with `gpt-5.2-2025-12-11` + web search.
+1) (YouTube) fetch captions via `yt-dlp` when available, otherwise download audio via `yt-dlp` → 2) transcribe with `gpt-4o-transcribe` → 3) fact-check with `gpt-5.2-2025-12-11` + web search.
 
 ## Security note (important)
 If you pasted an OpenAI API key into chat, assume it is compromised and **rotate it immediately** in the OpenAI dashboard.
 
 ## Prereqs
 - Python 3.10+
-- `ffmpeg` (required by `yt-dlp` for MP3 extraction)
+- `ffmpeg` (required by `yt-dlp` for MP3 extraction when captions aren't available)
   - macOS: `brew install ffmpeg`
 
 ## Setup

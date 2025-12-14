@@ -11,7 +11,7 @@ from .config import settings
 from .openai_pipeline import fact_check_transcript, transcribe_audio_mp3
 from .schemas import HistoryItem, Job
 from .storage import read_json, write_json, write_model
-from .ytdlp_audio import DownloadError, download_mp3
+from .ytdlp_audio import DownloadError, download_mp3, get_youtube_transcript, is_youtube_url
 
 
 def _normalize_url(url: str) -> str:
@@ -183,17 +183,31 @@ class JobStore:
             return
 
         try:
-            await self.update(job_id, status="downloading", progress=10, error=None)
             audio_dir = self._audio_dir(job_id)
-            mp3_path = await asyncio.to_thread(
-                download_mp3,
-                url=job.url,
-                out_dir=audio_dir,
-                cookies_file=settings.ytdlp_cookies_file,
-            )
 
-            await self.update(job_id, status="transcribing", progress=40)
-            transcript = await asyncio.to_thread(transcribe_audio_mp3, mp3_path)
+            transcript: Optional[str] = None
+            if is_youtube_url(job.url):
+                await self.update(job_id, status="fetching_transcript", progress=10, error=None)
+                transcript = await asyncio.to_thread(
+                    get_youtube_transcript,
+                    url=job.url,
+                    out_dir=audio_dir,
+                    cookies_file=settings.ytdlp_cookies_file,
+                    prefer_original_language=True,
+                )
+
+            if not (transcript or "").strip():
+                await self.update(job_id, status="downloading", progress=10, error=None)
+                mp3_path = await asyncio.to_thread(
+                    download_mp3,
+                    url=job.url,
+                    out_dir=audio_dir,
+                    cookies_file=settings.ytdlp_cookies_file,
+                )
+
+                await self.update(job_id, status="transcribing", progress=40)
+                transcript = await asyncio.to_thread(transcribe_audio_mp3, mp3_path)
+
             self._transcript_path(job_id).write_text(transcript, encoding="utf-8")
 
             await self.update(job_id, status="fact_checking", progress=70, transcript=transcript)
