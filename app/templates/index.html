@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fact-Check Reels</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>Fact-Check Instagram Reels</h1>
+        <p class="muted">
+          Paste a Reel URL → download audio → transcribe → fact-check with web search.
+        </p>
+      </header>
+
+      <section class="card">
+        <label class="label" for="url">Instagram Reel URL</label>
+        <div class="row">
+          <input id="url" class="input" placeholder="https://www.instagram.com/reel/..." />
+          <button id="run" class="btn">Analyze</button>
+        </div>
+        <p class="hint">
+          Some reels require cookies. Set <code>YTDLP_COOKIES_FILE</code> in <code>.env</code>.
+        </p>
+      </section>
+
+      <section id="statusCard" class="card hidden">
+        <div class="row space-between">
+          <div>
+            <div class="label">Status</div>
+            <div id="statusText" class="status">—</div>
+          </div>
+          <div class="pill" id="progressPill">0%</div>
+        </div>
+        <div class="bar">
+          <div id="progressBar" class="barFill" style="width: 0%"></div>
+        </div>
+        <div id="errorBox" class="error hidden"></div>
+      </section>
+
+      <section id="resultCard" class="card hidden">
+        <h2>Report</h2>
+        <div id="reportSummary" class="summary"></div>
+        <div class="grid">
+          <div>
+            <h3>What’s right</h3>
+            <ul id="whatsRight"></ul>
+          </div>
+          <div>
+            <h3>What’s wrong</h3>
+            <ul id="whatsWrong"></ul>
+          </div>
+        </div>
+
+        <h3>Danger / Harm</h3>
+        <ul id="dangerList"></ul>
+
+        <details>
+          <summary>Sources used</summary>
+          <ul id="sourcesList"></ul>
+        </details>
+
+        <details>
+          <summary>Claims (detailed)</summary>
+          <pre id="claimsJson" class="pre"></pre>
+        </details>
+
+        <details>
+          <summary>Transcript</summary>
+          <pre id="transcript" class="pre"></pre>
+        </details>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
