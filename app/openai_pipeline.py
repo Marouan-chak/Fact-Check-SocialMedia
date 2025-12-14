@@ -1,19 +1,231 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from math import ceil
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from openai import OpenAI
 
 from .config import settings
-from .prompts import FACTCHECK_SYSTEM_PROMPT, build_factcheck_user_prompt
+from .prompts import FACTCHECK_SYSTEM_PROMPT, TRANSCRIBE_PROMPT, build_factcheck_user_prompt
 from .schemas import FactCheckReport
 
 
 class OpenAIError(RuntimeError):
     pass
+
+
+class TranscriptionError(RuntimeError):
+    pass
+
+
+def _clamp_int(value: Any, *, low: int, high: int, default: int) -> int:
+    try:
+        n = int(value)
+    except Exception:
+        return default
+    return max(low, min(high, n))
+
+
+def _weighted_correctness(verdict: str, confidence: int) -> float:
+    """
+    Maps a claim verdict + confidence into a 0..1 "correctness" value.
+    Confidence shrinks the value toward 0.5 (unknown) when low.
+    """
+    base_by_verdict = {
+        "supported": 1.0,
+        "contradicted": 0.0,
+        "mixed": 0.6,
+        "unverifiable": 0.5,
+    }
+    base = base_by_verdict.get(verdict, 0.5)
+    conf = max(0.0, min(1.0, confidence / 100.0))
+    return 0.5 + (base - 0.5) * conf
+
+
+def _compute_weighted_overall(report_dict: dict[str, Any]) -> None:
+    """
+    Computes overall_score + overall_verdict from per-claim verdicts using per-claim weights.
+    This makes central/primary claims affect the score much more than minor ones.
+    """
+    claims = report_dict.get("claims")
+    if not isinstance(claims, list) or not claims:
+        report_dict["overall_score"] = 50
+        report_dict["overall_verdict"] = "unverifiable"
+        return
+
+    total_weight = 0.0
+    weighted_sum = 0.0
+    unverifiable_weight = 0.0
+
+    scorable_weights = []
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        verdict = str(c.get("verdict") or "").strip()
+        if verdict == "not_a_factual_claim":
+            c["weight"] = 0
+            continue
+
+        weight = _clamp_int(c.get("weight"), low=0, high=100, default=0)
+        confidence = _clamp_int(c.get("confidence"), low=0, high=100, default=50)
+        scorable_weights.append(weight)
+
+        c["weight"] = weight
+
+    if not scorable_weights:
+        report_dict["overall_score"] = 50
+        report_dict["overall_verdict"] = "unverifiable"
+        return
+
+    if sum(scorable_weights) <= 0:
+        # Backwards compatibility (older reports) or model output with missing weights:
+        # treat all claims as equally weighted.
+        for c in claims:
+            if isinstance(c, dict) and str(c.get("verdict") or "").strip() != "not_a_factual_claim":
+                c["weight"] = 1
+
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        verdict = str(c.get("verdict") or "").strip()
+        if verdict == "not_a_factual_claim":
+            continue
+
+        weight = _clamp_int(c.get("weight"), low=0, high=100, default=0)
+        confidence = _clamp_int(c.get("confidence"), low=0, high=100, default=50)
+        if weight <= 0:
+            continue
+
+        total_weight += weight
+        weighted_sum += weight * _weighted_correctness(verdict, confidence)
+        if verdict == "unverifiable":
+            unverifiable_weight += weight
+
+    if total_weight <= 0:
+        report_dict["overall_score"] = 50
+        report_dict["overall_verdict"] = "unverifiable"
+        return
+
+    score = int(round((weighted_sum / total_weight) * 100))
+    score = max(0, min(100, score))
+
+    unverifiable_ratio = unverifiable_weight / total_weight if total_weight else 1.0
+    if unverifiable_ratio >= 0.6:
+        overall_verdict = "unverifiable"
+    else:
+        if score >= 90:
+            overall_verdict = "accurate"
+        elif score >= 70:
+            overall_verdict = "mostly_accurate"
+        elif score >= 40:
+            overall_verdict = "mixed"
+        elif score >= 10:
+            overall_verdict = "misleading"
+        else:
+            overall_verdict = "false"
+
+    report_dict["overall_score"] = score
+    report_dict["overall_verdict"] = overall_verdict
+
+
+def _audio_duration_seconds(path: Path) -> Optional[float]:
+    """
+    Returns duration in seconds using ffprobe when available; otherwise None.
+    """
+    if shutil.which("ffprobe") is None:
+        return None
+
+    proc = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        return float((proc.stdout or "").strip())
+    except Exception:
+        return None
+
+
+def _split_mp3_into_segments(*, mp3_path: Path, out_dir: Path, segment_seconds: int) -> list[Path]:
+    """
+    Splits an MP3 into multiple MP3 segments using ffmpeg.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise TranscriptionError("ffmpeg not found (required for long-audio chunking).")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_template = str(out_dir / "part_%03d.mp3")
+
+    # Try stream copy first (fast). If it fails, fall back to re-encode.
+    for cmd in (
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(mp3_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(int(segment_seconds)),
+            "-reset_timestamps",
+            "1",
+            "-c",
+            "copy",
+            out_template,
+        ],
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(mp3_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(int(segment_seconds)),
+            "-reset_timestamps",
+            "1",
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "4",
+            out_template,
+        ],
+    ):
+        # Clean previous attempts
+        for p in out_dir.glob("part_*.mp3"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0:
+            parts = sorted(out_dir.glob("part_*.mp3"))
+            if parts:
+                return parts
+
+    raise TranscriptionError("Failed to split audio into chunks with ffmpeg.")
 
 
 def _dereference_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -92,17 +304,71 @@ def _client() -> OpenAI:
 
 
 def transcribe_audio_mp3(mp3_path: Path) -> str:
-    client = _client()
-    with mp3_path.open("rb") as f:
-        tx = client.audio.transcriptions.create(
-            model=settings.transcribe_model,
-            file=f,
-            response_format="text",
-        )
-    # SDK may return a plain string or an object with `.text`
-    if isinstance(tx, str):
-        return tx
-    return getattr(tx, "text", "") or ""
+    duration = _audio_duration_seconds(mp3_path)
+    chunk_seconds = max(60, int(getattr(settings, "transcribe_chunk_seconds", 900) or 900))
+
+    # If duration is unknown, we keep the existing behavior and transcribe as a single file.
+    if duration is None or duration <= chunk_seconds:
+        client = _client()
+        with mp3_path.open("rb") as f:
+            tx = client.audio.transcriptions.create(
+                model=settings.transcribe_model,
+                file=f,
+                response_format="text",
+                prompt=TRANSCRIBE_PROMPT,
+                temperature=1,
+            )
+        if isinstance(tx, str):
+            return tx
+        return getattr(tx, "text", "") or ""
+
+    segments_dir = mp3_path.parent / "segments"
+    parts = _split_mp3_into_segments(mp3_path=mp3_path, out_dir=segments_dir, segment_seconds=chunk_seconds)
+
+    expected_parts = int(ceil(duration / chunk_seconds))
+    parts = parts[: max(1, expected_parts)]
+
+    def transcribe_one(index: int, part_path: Path) -> tuple[int, str]:
+        client = _client()
+        with part_path.open("rb") as f:
+            tx = client.audio.transcriptions.create(
+                model=settings.transcribe_model,
+                file=f,
+                response_format="text",
+                prompt=TRANSCRIBE_PROMPT,
+                temperature=1,
+            )
+        text = tx if isinstance(tx, str) else (getattr(tx, "text", "") or "")
+        return index, (text or "").strip()
+
+    max_workers = max(1, int(getattr(settings, "transcribe_max_workers", 3) or 3))
+    max_workers = min(max_workers, len(parts))
+
+    results: dict[int, str] = {}
+    errors: list[Exception] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(transcribe_one, idx, part): idx for idx, part in enumerate(parts, start=1)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                part_idx, text = fut.result()
+            except Exception as e:
+                errors.append(e)
+                continue
+            results[part_idx] = text
+
+    if errors:
+        raise TranscriptionError(f"Chunk transcription failed for {len(errors)} part(s).")
+
+    chunks: list[str] = []
+    total = len(parts)
+    for idx in range(1, total + 1):
+        text = (results.get(idx) or "").strip()
+        if not text:
+            continue
+        chunks.append(f"[Part {idx}/{total}]\n{text}")
+
+    return "\n\n".join(chunks).strip()
 
 
 def fact_check_transcript(
@@ -156,6 +422,9 @@ def fact_check_transcript(
 
     if "generated_at" not in report_dict:
         report_dict["generated_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+    # Enforce weighted scoring in a consistent way.
+    _compute_weighted_overall(report_dict)
 
     report = FactCheckReport.model_validate(report_dict)
     raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}

@@ -18,7 +18,16 @@ Rules:
 - Avoid doxxing or unnecessary personal details; focus on verifying claims, not identifying individuals.
 - IMPORTANT: Every field in the JSON schema is required. Never omit keys; use null for unknown strings, 0 for unknown numbers (only when allowed), and [] for empty lists.
 
-Scoring guidance (0-100):
+Scoring guidance (0-100) — IMPORTANT: use weighted claims:
+- Assign each factual claim a weight (0-100) representing how central it is to the video's main message.
+  - Core/central claims should carry most of the weight.
+  - Minor/side claims should have small weight.
+  - If verdict is not_a_factual_claim, weight must be 0.
+- The weights across scorable claims should add up to ~100 (does not need to be perfect).
+- The overall_score should reflect weighted accuracy: a wrong central claim should sharply reduce the score,
+  while a wrong minor claim should not change it much.
+
+Score bands:
 - 90–100: strong evidence most claims correct; minor quibbles only.
 - 70–89: mostly correct but some missing context or small errors.
 - 40–69: mixed; multiple important issues or cherry-picking.
@@ -38,6 +47,14 @@ Danger items:
 - include a short mitigation suggestion when applicable.
 
 Output must follow the provided JSON schema exactly.
+"""
+
+TRANSCRIBE_PROMPT = """\
+Transcribe the audio verbatim in the original language(s) spoken.
+Do not translate.
+Preserve wording, numbers, proper nouns, and slang as said.
+Use natural punctuation when clear, but do not paraphrase or summarize.
+If the audio is unclear, keep the best guess and (inaudible) only when necessary.
 """
 
 
@@ -93,6 +110,10 @@ def build_factcheck_user_prompt(*, transcript: str, url: str | None = None, outp
         f"{transcript}\n\n"
         "Task:\n"
         "1) Extract the distinct factual claims (including implied numeric/statistical claims).\n"
+        "   - For each factual claim, assign a weight (0-100) indicating how central it is to the video's main message.\n"
+        "   - The most central claims should have the highest weights.\n"
+        "   - Across scorable claims, weights should add up to ~100.\n"
+        "   - If verdict is not_a_factual_claim, weight must be 0.\n"
         "2) Verify each claim using web_search.\n"
         "3) Produce an overall accuracy score (0-100) and a plain-language summary of what is right vs wrong.\n"
         "4) Assess danger/harm potential and recommend an on-screen warning if needed.\n"

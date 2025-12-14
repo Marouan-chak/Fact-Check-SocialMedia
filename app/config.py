@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     ytdlp_cookies_file: Optional[Path] = None
 
     transcribe_model: str = "gpt-4o-transcribe"
+    transcribe_chunk_seconds: int = 900  # 15 minutes
+    transcribe_max_workers: int = 3
     factcheck_model: str = "gpt-5.2-2025-12-11"
 
     @field_validator("ytdlp_cookies_file", mode="before")

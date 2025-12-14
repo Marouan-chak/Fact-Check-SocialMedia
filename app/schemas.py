@@ -40,6 +40,12 @@ class Source(BaseModel):
 class ClaimCheck(BaseModel):
     claim: str = Field(..., description="A single checkable factual claim.")
     verdict: ClaimVerdict
+    weight: int = Field(
+        0,
+        ge=0,
+        le=100,
+        description="Importance weight (0-100) for overall score. Higher = more central to the video's main message.",
+    )
     confidence: int = Field(..., ge=0, le=100)
     explanation: str = Field(..., description="Why the verdict was chosen, with key evidence.")
     correction: Optional[str] = Field(None, description="If wrong/misleading, what the accurate claim should be.")

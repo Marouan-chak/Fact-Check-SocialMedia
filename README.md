@@ -30,6 +30,7 @@ Open `http://127.0.0.1:8000`.
 - Optional re-run to overwrite the saved report
 - History panel (shows previously analyzed videos)
 - Supports many sites via `yt-dlp` (YouTube, Instagram, X/Twitter, etc.)
+- Weighted scoring (central claims impact the score more than minor claims)
 
 ## Docker
 ```bash
@@ -40,3 +41,4 @@ docker compose up --build
 ## Notes
 - Downloading content may be restricted by Instagram and/or violate terms for certain URLs. Use only content you have rights to access.
 - For some reels you may need cookies (`YTDLP_COOKIES_FILE`).
+- Long videos: audio is automatically chunked into 15-minute segments (configurable via `TRANSCRIBE_CHUNK_SECONDS`) and transcribed (optionally in parallel via `TRANSCRIBE_MAX_WORKERS`) before fact-checking.

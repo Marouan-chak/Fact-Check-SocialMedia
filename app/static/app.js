@@ -32,8 +32,15 @@ const els = {
   whatsWrong: document.getElementById("whatsWrong"),
   dangerList: document.getElementById("dangerList"),
   sourcesList: document.getElementById("sourcesList"),
-  claimsJson: document.getElementById("claimsJson"),
+  claimsList: document.getElementById("claimsList"),
   transcript: document.getElementById("transcript"),
+
+  tabClaims: document.getElementById("tabClaims"),
+  tabSources: document.getElementById("tabSources"),
+  tabTranscript: document.getElementById("tabTranscript"),
+  panelClaims: document.getElementById("panelClaims"),
+  panelSources: document.getElementById("panelSources"),
+  panelTranscript: document.getElementById("panelTranscript"),
 };
 
 const LANGUAGES_PINNED = [
@@ -81,6 +88,7 @@ const LANGUAGES = [...LANGUAGES_PINNED, ...LANGUAGES_OTHERS];
 let selectedLanguage = LANGUAGES[0];
 let lastSubmittedUrl = "";
 let currentReportLanguage = null;
+let activeDetailsTab = "claims";
 
 const RTL_LANGS = new Set(["ar", "fa", "he", "ur"]);
 
@@ -103,7 +111,7 @@ function applyOutputDirection() {
   const dir = isRtlLanguage(lang) ? "rtl" : "ltr";
 
   // AI-generated (human-readable) fields: set explicit direction by chosen output language.
-  const outputEls = [els.reportSummary, els.whatsRight, els.whatsWrong, els.dangerList];
+  const outputEls = [els.reportSummary, els.whatsRight, els.whatsWrong, els.dangerList, els.claimsList];
   for (const el of outputEls) {
     if (!el) continue;
     el.setAttribute("dir", dir);
@@ -113,7 +121,26 @@ function applyOutputDirection() {
   // Mixed/structured blocks: keep readable in any locale.
   if (els.sourcesList) els.sourcesList.setAttribute("dir", "auto");
   if (els.transcript) els.transcript.setAttribute("dir", "auto");
-  if (els.claimsJson) els.claimsJson.setAttribute("dir", "ltr");
+}
+
+function setDetailsTab(name) {
+  activeDetailsTab = name;
+
+  const tabs = [
+    { name: "claims", tab: els.tabClaims, panel: els.panelClaims },
+    { name: "sources", tab: els.tabSources, panel: els.panelSources },
+    { name: "transcript", tab: els.tabTranscript, panel: els.panelTranscript },
+  ];
+
+  for (const t of tabs) {
+    const isActive = t.name === name;
+    if (t.tab) {
+      t.tab.classList.toggle("tabBtnActive", isActive);
+      t.tab.setAttribute("aria-selected", isActive ? "true" : "false");
+      t.tab.tabIndex = isActive ? 0 : -1;
+    }
+    if (t.panel) setHidden(t.panel, !isActive);
+  }
 }
 
 function setProgress(pct) {
@@ -166,6 +193,216 @@ function setSources(ul, sources) {
     a.textContent = `${pub}${s.title}`;
     li.appendChild(a);
     ul.appendChild(li);
+  }
+}
+
+function verdictLabel(verdict) {
+  return humanizeEnum(verdict || "");
+}
+
+function verdictClass(verdict) {
+  switch (String(verdict || "")) {
+    case "supported":
+      return "supported";
+    case "contradicted":
+      return "contradicted";
+    case "mixed":
+      return "mixed";
+    case "unverifiable":
+      return "unverifiable";
+    case "not_a_factual_claim":
+      return "notclaim";
+    default:
+      return "unverifiable";
+  }
+}
+
+function verdictColor(verdict) {
+  switch (String(verdict || "")) {
+    case "supported":
+      return "#2ee59d";
+    case "contradicted":
+      return "var(--danger)";
+    case "mixed":
+      return "#ffd24a";
+    case "unverifiable":
+    case "not_a_factual_claim":
+    default:
+      return "var(--muted)";
+  }
+}
+
+function metricRow({ label, valueText, percent, color }) {
+  const wrap = document.createElement("div");
+  wrap.className = "metric";
+
+  const head = document.createElement("div");
+  head.className = "metricHead";
+
+  const l = document.createElement("div");
+  l.className = "metricLabel";
+  l.textContent = label;
+
+  const v = document.createElement("div");
+  v.className = "metricValue";
+  const bdi = document.createElement("bdi");
+  bdi.setAttribute("dir", "ltr");
+  bdi.textContent = valueText;
+  v.appendChild(bdi);
+
+  head.appendChild(l);
+  head.appendChild(v);
+
+  const bar = document.createElement("div");
+  bar.className = "metricBar";
+  const fill = document.createElement("div");
+  fill.className = "metricFill";
+  fill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+  fill.style.background = color;
+  bar.appendChild(fill);
+
+  wrap.appendChild(head);
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+function renderClaimSources(sources) {
+  const ul = document.createElement("ul");
+  ul.className = "claimSources";
+  for (const s of sources || []) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = s.url;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    const pub = s.publisher ? `${s.publisher} — ` : "";
+    a.textContent = `${pub}${s.title}`;
+    li.appendChild(a);
+    ul.appendChild(li);
+  }
+  return ul;
+}
+
+function renderClaims(claims) {
+  if (!els.claimsList) return;
+  els.claimsList.innerHTML = "";
+
+  const list = Array.isArray(claims) ? claims.slice() : [];
+  list.sort((a, b) => Number(b?.weight ?? 0) - Number(a?.weight ?? 0));
+
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted small";
+    empty.textContent = "No claims extracted.";
+    els.claimsList.appendChild(empty);
+    return;
+  }
+
+  for (const c of list) {
+    const details = document.createElement("details");
+    details.className = `claimCard claimCard_${verdictClass(c?.verdict)}`;
+
+    const summary = document.createElement("summary");
+    summary.className = "claimSummary";
+
+    const sumInner = document.createElement("div");
+    sumInner.className = "claimSummaryInner";
+
+    const text = document.createElement("div");
+    text.className = "claimText";
+    text.textContent = c?.claim || "";
+
+    const chips = document.createElement("div");
+    chips.className = "chips";
+
+    const verdict = document.createElement("span");
+    verdict.className = `chip chipVerdict chipVerdict_${verdictClass(c?.verdict)}`;
+    verdict.setAttribute("dir", "ltr");
+    verdict.textContent = verdictLabel(c?.verdict) || "Unverifiable";
+
+    const weight = Number(c?.weight ?? 0);
+    const weightChip = document.createElement("span");
+    weightChip.className = "chip";
+    weightChip.setAttribute("dir", "ltr");
+    weightChip.textContent = `Weight ${Math.max(0, Math.min(100, weight))}/100`;
+
+    const conf = Number(c?.confidence ?? 0);
+    const confChip = document.createElement("span");
+    confChip.className = "chip";
+    confChip.setAttribute("dir", "ltr");
+    confChip.textContent = `Confidence ${Math.max(0, Math.min(100, conf))}/100`;
+
+    chips.appendChild(verdict);
+    chips.appendChild(weightChip);
+    chips.appendChild(confChip);
+
+    sumInner.appendChild(text);
+    sumInner.appendChild(chips);
+    summary.appendChild(sumInner);
+
+    const body = document.createElement("div");
+    body.className = "claimBody";
+
+    body.appendChild(
+      metricRow({
+        label: "Centrality (weight)",
+        valueText: `${Math.max(0, Math.min(100, weight))}/100`,
+        percent: weight,
+        color: "linear-gradient(90deg, var(--accent), rgba(0,200,255,0.9))",
+      }),
+    );
+
+    body.appendChild(
+      metricRow({
+        label: "Evidence confidence",
+        valueText: `${Math.max(0, Math.min(100, conf))}/100`,
+        percent: conf,
+        color: `linear-gradient(90deg, ${verdictColor(c?.verdict)}, rgba(255,255,255,0.12))`,
+      }),
+    );
+
+    const explanation = document.createElement("div");
+    explanation.className = "claimSection";
+    const exLabel = document.createElement("div");
+    exLabel.className = "sectionLabel";
+    exLabel.textContent = "Explanation";
+    const exText = document.createElement("div");
+    exText.className = "sectionText";
+    exText.textContent = c?.explanation || "";
+    explanation.appendChild(exLabel);
+    explanation.appendChild(exText);
+    body.appendChild(explanation);
+
+    const correctionText = (c?.correction || "").trim();
+    if (correctionText) {
+      const corr = document.createElement("div");
+      corr.className = "callout";
+      const corrLabel = document.createElement("div");
+      corrLabel.className = "sectionLabel";
+      corrLabel.textContent = "Correction";
+      const corrBody = document.createElement("div");
+      corrBody.className = "sectionText";
+      corrBody.textContent = correctionText;
+      corr.appendChild(corrLabel);
+      corr.appendChild(corrBody);
+      body.appendChild(corr);
+    }
+
+    const sources = Array.isArray(c?.sources) ? c.sources : [];
+    if (sources.length) {
+      const src = document.createElement("div");
+      src.className = "claimSection";
+      const sLabel = document.createElement("div");
+      sLabel.className = "sectionLabel";
+      sLabel.textContent = "Sources";
+      src.appendChild(sLabel);
+      src.appendChild(renderClaimSources(sources));
+      body.appendChild(src);
+    }
+
+    details.appendChild(summary);
+    details.appendChild(body);
+    els.claimsList.appendChild(details);
   }
 }
 
@@ -232,6 +469,7 @@ function renderResult(job) {
   setHidden(els.resultCard, false);
   currentReportLanguage = job.output_language || currentReportLanguage || selectedLanguage.code;
   applyOutputDirection();
+  setDetailsTab(activeDetailsTab || "claims");
 
   const score = Number(job.report?.overall_score ?? 0);
   els.scorePct.textContent = `${Math.max(0, Math.min(100, score))}%`;
@@ -257,7 +495,7 @@ function renderResult(job) {
 
   setSources(els.sourcesList, job.report?.sources_used || []);
 
-  els.claimsJson.textContent = JSON.stringify(job.report?.claims || [], null, 2);
+  renderClaims(job.report?.claims || []);
   els.transcript.textContent = job.transcript || "";
 }
 
@@ -461,3 +699,7 @@ if (els.historyRefresh) {
     await loadHistory();
   });
 }
+
+if (els.tabClaims) els.tabClaims.addEventListener("click", () => setDetailsTab("claims"));
+if (els.tabSources) els.tabSources.addEventListener("click", () => setDetailsTab("sources"));
+if (els.tabTranscript) els.tabTranscript.addEventListener("click", () => setDetailsTab("transcript"));

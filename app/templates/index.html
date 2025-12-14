@@ -111,20 +111,48 @@
         <h3>Danger / Harm</h3>
         <ul id="dangerList"></ul>
 
-        <details>
-          <summary>Sources used</summary>
+        <div class="panelTabs" role="tablist" aria-label="Report details">
+          <button
+            id="tabClaims"
+            class="tabBtn tabBtnActive"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="panelClaims"
+          >
+            Claims (detailed)
+          </button>
+          <button
+            id="tabSources"
+            class="tabBtn"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panelSources"
+          >
+            Sources used
+          </button>
+          <button
+            id="tabTranscript"
+            class="tabBtn"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panelTranscript"
+          >
+            Transcript
+          </button>
+        </div>
+
+        <div id="panelClaims" class="panel" role="tabpanel" aria-labelledby="tabClaims">
+          <div id="claimsList" class="claims"></div>
+        </div>
+        <div id="panelSources" class="panel hidden" role="tabpanel" aria-labelledby="tabSources">
           <ul id="sourcesList"></ul>
-        </details>
-
-        <details>
-          <summary>Claims (detailed)</summary>
-          <pre id="claimsJson" class="pre"></pre>
-        </details>
-
-        <details>
-          <summary>Transcript</summary>
+        </div>
+        <div id="panelTranscript" class="panel hidden" role="tabpanel" aria-labelledby="tabTranscript">
           <pre id="transcript" class="pre"></pre>
-        </details>
+        </div>
       </section>
     </main>
 
