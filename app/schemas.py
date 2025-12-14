@@ -94,3 +94,15 @@ class Job(BaseModel):
     error: Optional[str] = None
     transcript: Optional[str] = None
     report: Optional[FactCheckReport] = None
+
+
+class HistoryItem(BaseModel):
+    id: str
+    url: str
+    output_language: str
+    status: JobStatus
+    created_at: datetime
+    updated_at: datetime
+    overall_score: Optional[int] = None
+    overall_verdict: Optional[OverallVerdict] = None
+    summary: Optional[str] = None

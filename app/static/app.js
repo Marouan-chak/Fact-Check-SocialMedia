@@ -10,6 +10,11 @@ const els = {
   langList: document.getElementById("langList"),
   langLabel: document.getElementById("langLabel"),
 
+  historyToggle: document.getElementById("historyToggle"),
+  historyCard: document.getElementById("historyCard"),
+  historyRefresh: document.getElementById("historyRefresh"),
+  historyList: document.getElementById("historyList"),
+
   statusCard: document.getElementById("statusCard"),
   statusText: document.getElementById("statusText"),
   progressPill: document.getElementById("progressPill"),
@@ -75,10 +80,40 @@ const LANGUAGES = [...LANGUAGES_PINNED, ...LANGUAGES_OTHERS];
 
 let selectedLanguage = LANGUAGES[0];
 let lastSubmittedUrl = "";
+let currentReportLanguage = null;
+
+const RTL_LANGS = new Set(["ar", "fa", "he", "ur"]);
 
 function setHidden(el, hidden) {
   if (hidden) el.classList.add("hidden");
   else el.classList.remove("hidden");
+}
+
+function setText(el, text) {
+  if (!el) return;
+  el.textContent = text ?? "";
+}
+
+function isRtlLanguage(code) {
+  return RTL_LANGS.has(String(code || "").toLowerCase());
+}
+
+function applyOutputDirection() {
+  const lang = String(currentReportLanguage || selectedLanguage?.code || "en").toLowerCase();
+  const dir = isRtlLanguage(lang) ? "rtl" : "ltr";
+
+  // AI-generated (human-readable) fields: set explicit direction by chosen output language.
+  const outputEls = [els.reportSummary, els.whatsRight, els.whatsWrong, els.dangerList];
+  for (const el of outputEls) {
+    if (!el) continue;
+    el.setAttribute("dir", dir);
+    el.setAttribute("lang", lang);
+  }
+
+  // Mixed/structured blocks: keep readable in any locale.
+  if (els.sourcesList) els.sourcesList.setAttribute("dir", "auto");
+  if (els.transcript) els.transcript.setAttribute("dir", "auto");
+  if (els.claimsJson) els.claimsJson.setAttribute("dir", "ltr");
 }
 
 function setProgress(pct) {
@@ -91,6 +126,30 @@ function setList(ul, items) {
   for (const item of items || []) {
     const li = document.createElement("li");
     li.textContent = item;
+    ul.appendChild(li);
+  }
+}
+
+function setDangerList(ul, items) {
+  ul.innerHTML = "";
+  for (const d of items || []) {
+    const li = document.createElement("li");
+
+    const head = document.createElement("bdi");
+    head.setAttribute("dir", "ltr");
+    const sev =
+      typeof d.severity === "number" && Number.isFinite(d.severity) ? ` (severity ${d.severity}/5)` : "";
+    head.textContent = `${d.category || "other"}${sev}`;
+
+    const sep = document.createElement("span");
+    sep.textContent = ": ";
+
+    const body = document.createElement("span");
+    body.textContent = d.description || "";
+
+    li.appendChild(head);
+    li.appendChild(sep);
+    li.appendChild(body);
     ul.appendChild(li);
   }
 }
@@ -162,16 +221,22 @@ function humanizeEnum(value) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function scoreColor(score) {
+  const s = Number(score ?? 0);
+  if (s < 50) return "var(--danger)";
+  if (s < 80) return "#ffd24a";
+  return "#2ee59d";
+}
+
 function renderResult(job) {
   setHidden(els.resultCard, false);
+  currentReportLanguage = job.output_language || currentReportLanguage || selectedLanguage.code;
+  applyOutputDirection();
 
   const score = Number(job.report?.overall_score ?? 0);
   els.scorePct.textContent = `${Math.max(0, Math.min(100, score))}%`;
   els.scoreCircle.style.setProperty("--pct", String(Math.max(0, Math.min(100, score))));
-  let color = "#2ee59d";
-  if (score < 50) color = "var(--danger)";
-  else if (score < 80) color = "#ffd24a";
-  els.scoreCircle.style.setProperty("--score-color", color);
+  els.scoreCircle.style.setProperty("--score-color", scoreColor(score));
 
   const verdict = humanizeEnum(job.report?.overall_verdict);
   els.verdictText.textContent = verdict ? `Overall: ${verdict}` : "";
@@ -188,11 +253,7 @@ function renderResult(job) {
   setList(els.whatsRight, job.report?.whats_right || []);
   setList(els.whatsWrong, job.report?.whats_wrong || []);
 
-  const dangers = (job.report?.danger || []).map((d) => {
-    const sev = typeof d.severity === "number" ? ` (severity ${d.severity}/5)` : "";
-    return `${d.category}${sev}: ${d.description}`;
-  });
-  setList(els.dangerList, dangers);
+  setDangerList(els.dangerList, job.report?.danger || []);
 
   setSources(els.sourcesList, job.report?.sources_used || []);
 
@@ -249,6 +310,100 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeLangMenu();
 });
 
+function setSelectedLanguageByCode(code) {
+  const c = String(code || "").toLowerCase();
+  const match = LANGUAGES.find((l) => l.code === c);
+  if (match) {
+    selectedLanguage = match;
+    setText(els.langLabel, match.name);
+  }
+}
+
+function formatWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
+}
+
+function renderHistory(items) {
+  els.historyList.innerHTML = "";
+  if (!items || items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted small";
+    empty.textContent = "No analyses yet.";
+    els.historyList.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "historyItem";
+
+    const score = typeof item.overall_score === "number" ? item.overall_score : null;
+    const scoreEl = document.createElement("div");
+    scoreEl.className = "historyScore";
+    if (score !== null) {
+      scoreEl.style.color = scoreColor(score);
+      scoreEl.textContent = `${score}%`;
+    } else {
+      scoreEl.style.color = "var(--muted)";
+      scoreEl.textContent = "—";
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "historyMeta";
+    const url = document.createElement("div");
+    url.className = "historyUrl";
+    url.textContent = item.url || "";
+    const sub = document.createElement("div");
+    sub.className = "historySub";
+    const b1 = document.createElement("span");
+    b1.className = "badge";
+    b1.textContent = (item.output_language || "ar").toUpperCase();
+    const b2 = document.createElement("span");
+    b2.className = "badge";
+    b2.textContent = item.status || "";
+    const b3 = document.createElement("span");
+    b3.className = "badge";
+    b3.textContent = formatWhen(item.updated_at);
+    sub.appendChild(b1);
+    sub.appendChild(b2);
+    sub.appendChild(b3);
+    meta.appendChild(url);
+    meta.appendChild(sub);
+
+    const actions = document.createElement("div");
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "btn btnSecondary";
+    openBtn.textContent = "Open";
+    openBtn.addEventListener("click", async () => {
+      const job = await getJson(`/api/jobs/${item.id}`);
+      setHidden(els.errorBox, true);
+      setHidden(els.statusCard, true);
+      els.url.value = job.url || "";
+      lastSubmittedUrl = job.url || "";
+      setSelectedLanguageByCode(job.output_language || "ar");
+      els.forceRun.checked = false;
+      setHidden(els.infoBox, false);
+      els.infoBox.textContent = "Loaded from history.";
+      renderResult(job);
+      setHidden(els.historyCard, true);
+    });
+    actions.appendChild(openBtn);
+
+    row.appendChild(scoreEl);
+    row.appendChild(meta);
+    row.appendChild(actions);
+    els.historyList.appendChild(row);
+  }
+}
+
+async function loadHistory() {
+  const items = await getJson("/api/history?limit=50");
+  renderHistory(items);
+}
+
 async function runAnalysis({ force }) {
   const url = els.url.value.trim();
   if (!url) return;
@@ -290,3 +445,19 @@ els.rerunBtn.addEventListener("click", async () => {
   els.forceRun.checked = true;
   await runAnalysis({ force: true });
 });
+
+if (els.historyToggle && els.historyCard) {
+  els.historyToggle.addEventListener("click", async () => {
+    const isHidden = els.historyCard.classList.contains("hidden");
+    setHidden(els.historyCard, !isHidden);
+    if (isHidden) {
+      await loadHistory();
+    }
+  });
+}
+
+if (els.historyRefresh) {
+  els.historyRefresh.addEventListener("click", async () => {
+    await loadHistory();
+  });
+}

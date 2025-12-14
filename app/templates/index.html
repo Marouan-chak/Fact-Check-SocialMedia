@@ -3,24 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fact-Check Reels</title>
+    <title>Fact-Check Social Media</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="container">
       <header class="header">
-        <h1>Fact-Check Instagram Reels</h1>
-        <p class="muted">
-          Paste a Reel URL → download audio → transcribe → fact-check with web search.
-        </p>
+        <div class="headerRow">
+          <div>
+            <h1>Fact-Check Social Media</h1>
+            <p class="muted">
+              Paste a video URL (Instagram, YouTube, X, TikTok, etc.) → download audio → transcribe → fact-check with
+              web search.
+            </p>
+          </div>
+          <button id="historyToggle" class="btn btnSecondary" type="button">History</button>
+        </div>
       </header>
 
       <section class="card">
         <div class="grid2">
           <div>
-            <label class="label" for="url">Instagram Reel URL</label>
+            <label class="label" for="url">Video URL</label>
             <div class="row">
-              <input id="url" class="input" placeholder="https://www.instagram.com/reel/..." />
+              <input id="url" class="input" placeholder="https://www.instagram.com/reel/... or https://youtu.be/..." />
               <button id="run" class="btn">Analyze</button>
             </div>
           </div>
@@ -42,6 +48,17 @@
             </label>
           </div>
         </div>
+      </section>
+
+      <section id="historyCard" class="card hidden">
+        <div class="row space-between">
+          <div>
+            <div class="label">History</div>
+            <div class="muted small">Previously analyzed videos (newest first)</div>
+          </div>
+          <button id="historyRefresh" class="btn btnSecondary" type="button">Refresh</button>
+        </div>
+        <div id="historyList" class="historyList"></div>
       </section>
 
       <section id="statusCard" class="card hidden">

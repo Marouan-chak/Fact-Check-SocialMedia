@@ -1,5 +1,5 @@
-# Fact-Check Reels
-End-to-end platform to fact-check Instagram Reels audio:
+# Fact-Check Social Media
+End-to-end platform to fact-check social media video audio (Instagram, YouTube, X, etc.):
 1) download audio via `yt-dlp` → 2) transcribe with `gpt-4o-transcribe` → 3) fact-check with `gpt-5.2-2025-12-11` + web search.
 
 ## Security note (important)
@@ -28,6 +28,8 @@ Open `http://127.0.0.1:8000`.
 - Output language selector (Arabic/English/French + more)
 - Saved results per URL+language (submit the same URL again to reuse the last report)
 - Optional re-run to overwrite the saved report
+- History panel (shows previously analyzed videos)
+- Supports many sites via `yt-dlp` (YouTube, Instagram, X/Twitter, etc.)
 
 ## Docker
 ```bash

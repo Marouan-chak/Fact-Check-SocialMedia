@@ -30,6 +30,8 @@ a:hover { color: #f0ecff; text-decoration: underline; }
 
 .header h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0.2px; }
 .muted { color: var(--muted); margin: 0; }
+.headerRow { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+@media (max-width: 800px) { .headerRow { flex-direction: column; align-items: stretch; } }
 
 .card {
   margin-top: 16px;
@@ -54,6 +56,8 @@ a:hover { color: #f0ecff; text-decoration: underline; }
   outline: none;
 }
 .input:focus { border-color: rgba(124, 92, 255, 0.6); box-shadow: 0 0 0 3px rgba(124,92,255,0.2); }
+
+#url { direction: ltr; unicode-bidi: plaintext; }
 
 .btn {
   padding: 12px 14px;
@@ -194,7 +198,7 @@ a:hover { color: #f0ecff; text-decoration: underline; }
   justify-content: center;
   text-align: center;
 }
-.scorePct { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; }
+.scorePct { font-size: 44px; font-weight: 800; letter-spacing: -0.02em; direction: ltr; unicode-bidi: isolate; }
 .scoreLabel { color: var(--muted); font-size: 13px; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
 
 .resultMeta { flex: 1 1 auto; min-width: 0; }
@@ -208,10 +212,51 @@ a:hover { color: #f0ecff; text-decoration: underline; }
 }
 .btnSecondary:hover { background: rgba(255,255,255,0.10); }
 
-ul { margin: 8px 0 0; padding-left: 18px; }
+/* History */
+.historyList {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.historyItem {
+  display: grid;
+  grid-template-columns: 88px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+}
+@media (max-width: 800px) { .historyItem { grid-template-columns: 88px 1fr; } }
+.historyScore {
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  width: fit-content;
+}
+.historyMeta { min-width: 0; }
+.historyUrl {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.historySub { margin-top: 6px; color: var(--muted); font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; }
+.badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+}
+
+ul { margin: 8px 0 0; padding-inline-start: 18px; }
 li { margin: 6px 0; color: var(--text); }
 
-.summary { margin-top: 10px; color: var(--text); line-height: 1.45; }
+.summary { margin-top: 10px; color: var(--text); line-height: 1.45; text-align: start; }
 .pre {
   background: rgba(0,0,0,0.25);
   border: 1px solid var(--border);

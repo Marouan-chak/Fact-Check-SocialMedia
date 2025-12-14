@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from .config import settings
 from .openai_pipeline import fact_check_transcript, transcribe_audio_mp3
-from .schemas import Job
+from .schemas import HistoryItem, Job
 from .storage import read_json, write_json, write_model
 from .ytdlp_audio import DownloadError, download_mp3
 
@@ -128,6 +128,40 @@ class JobStore:
         async with self._lock:
             self._jobs[job_id] = job
         return job
+
+    async def list_history(self, *, limit: int = 50) -> list[HistoryItem]:
+        limit = max(1, min(int(limit or 50), 200))
+        if not self.jobs_dir.exists():
+            return []
+
+        items: list[HistoryItem] = []
+        for entry in self.jobs_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            job_path = entry / "job.json"
+            data = read_json(job_path)
+            if not isinstance(data, dict):
+                continue
+
+            report = data.get("report") if isinstance(data.get("report"), dict) else {}
+            payload = {
+                "id": data.get("id"),
+                "url": data.get("url"),
+                "output_language": data.get("output_language") or "ar",
+                "status": data.get("status"),
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+                "overall_score": report.get("overall_score"),
+                "overall_verdict": report.get("overall_verdict"),
+                "summary": report.get("summary"),
+            }
+            try:
+                items.append(HistoryItem.model_validate(payload))
+            except Exception:
+                continue
+
+        items.sort(key=lambda x: x.updated_at, reverse=True)
+        return items[:limit]
 
     async def update(self, job_id: str, **fields) -> None:
         async with self._lock:

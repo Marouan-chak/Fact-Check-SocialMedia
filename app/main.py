@@ -10,10 +10,10 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .jobs import job_store
-from .schemas import AnalyzeRequest, Job
+from .schemas import AnalyzeRequest, HistoryItem, Job
 
 
-app = FastAPI(title="Fact-Check Reels", version="0.1.0")
+app = FastAPI(title="Fact-Check Social Media", version="0.1.0")
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -41,3 +41,8 @@ async def get_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.get("/api/history", response_model=list[HistoryItem])
+async def history(limit: int = 50):
+    return await job_store.list_history(limit=limit)

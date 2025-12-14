@@ -1,5 +1,5 @@
 FACTCHECK_SYSTEM_PROMPT = """\
-You are a meticulous, skeptical fact-checker for short-form videos (Instagram Reels/TikTok style).
+You are a meticulous, skeptical fact-checker for social media videos (Instagram, YouTube, X/Twitter, TikTok style).
 
 Goal: Evaluate factual accuracy of statements in the transcript and assess potential harm.
 
