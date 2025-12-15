@@ -9,8 +9,24 @@ Method:
 3) Decide a per-claim verdict and confidence, then compute an overall verdict + score.
 4) Assess danger/harm potential (especially medical/financial/illegal/self-harm/dangerous challenges).
 
+CRITICAL — What is NOT a factual claim (use verdict: not_a_factual_claim, weight: 0):
+- Advertisements & promotions: "Use my code X for a discount", "Check out this product", sponsor mentions
+- Calls to action: "Subscribe", "Like and share", "Click the link below", "Buy now"
+- Opinions & preferences: "This is the best...", "I love...", "I think...", value judgments
+- Sarcasm & irony: Obviously exaggerated or ironic statements meant humorously
+- Rhetorical questions: Questions not meant to assert facts
+- Personal anecdotes: "I did X yesterday" (unless claiming verifiable external facts)
+- Hypotheticals: "What if...", "Imagine if...", speculation about possibilities
+- Predictions & forecasts: Future-oriented statements that can't be verified yet
+- Entertainment/humor: Jokes, skits, parody, clearly performative content
+- Expressions of intent: "I'm going to...", "I want to...", "My goal is..."
+- Greetings & filler: "Hey guys", "Welcome back", conversation fillers
+- Self-referential statements: "I'm making this video because...", meta-commentary
+
+Only extract claims that assert something about external reality that can be verified against evidence.
+
 Rules:
-- Separate *factual claims* from opinions, jokes, satire, rhetorical questions, or pure anecdotes.
+- Separate *factual claims* from the non-claims listed above. When in doubt, lean toward not_a_factual_claim.
 - Prefer primary/authoritative sources (government, academic/peer-reviewed, major institutions, reputable news).
 - Never hallucinate sources. Only cite sources you actually found via web search.
 - If evidence is weak/conflicting, say so explicitly and lower confidence.
@@ -109,13 +125,16 @@ def build_factcheck_user_prompt(*, transcript: str, url: str | None = None, outp
         "Transcript (verbatim, may contain errors):\n"
         f"{transcript}\n\n"
         "Task:\n"
-        "1) Extract the distinct factual claims (including implied numeric/statistical claims).\n"
+        "1) Extract only genuinely checkable factual claims (assertions about external reality).\n"
+        "   - SKIP: ads, promos, calls to action, opinions, sarcasm, jokes, predictions, personal anecdotes, hypotheticals.\n"
+        "   - If something looks like marketing ('use my code'), opinion ('best product ever'), or humor, do NOT try to verify it.\n"
         "   - For each factual claim, assign a weight (0-100) indicating how central it is to the video's main message.\n"
         "   - The most central claims should have the highest weights.\n"
         "   - Across scorable claims, weights should add up to ~100.\n"
         "   - If verdict is not_a_factual_claim, weight must be 0.\n"
-        "2) Verify each claim using web search.\n"
+        "2) Verify each genuine factual claim using web search.\n"
         "3) Produce an overall accuracy score (0-100) and a plain-language summary of what is right vs wrong.\n"
+        "   - If the video is mostly promotional/entertainment with few actual claims, note this and score based only on verifiable claims.\n"
         "4) Assess danger/harm potential and recommend an on-screen warning if needed.\n"
         "5) Populate sources_used with the unique sources you relied on (deduplicate URLs).\n"
     )

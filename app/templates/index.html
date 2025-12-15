@@ -223,12 +223,22 @@
           </div>
         </div>
 
-        <div id="thoughtsBox" class="thoughts-box hidden">
-          <div class="thoughts-header">
-            <div class="thoughts-title">Thought summaries</div>
-            <div id="thoughtsCount" class="thoughts-count">0</div>
+        <div id="thoughtsBox" class="progress-box hidden">
+          <div class="progress-box-header" id="progressToggle">
+            <div class="progress-box-title">
+              <svg class="progress-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+              </svg>
+              <span>AI Progress</span>
+            </div>
+            <div class="progress-box-actions">
+              <div id="thoughtsCount" class="progress-count">0</div>
+              <svg class="progress-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
           </div>
-          <div id="thoughtsList" class="thoughts-list" dir="auto"></div>
+          <div id="thoughtsList" class="progress-list" dir="auto"></div>
         </div>
         
         <div id="infoBox" class="alert alert-info hidden">

@@ -30,6 +30,7 @@ const els = {
   thoughtsBox: document.getElementById("thoughtsBox"),
   thoughtsList: document.getElementById("thoughtsList"),
   thoughtsCount: document.getElementById("thoughtsCount"),
+  progressToggle: document.getElementById("progressToggle"),
   resultCard: document.getElementById("resultCard"),
   scoreCircle: document.getElementById("scoreCircle"),
   scorePct: document.getElementById("scorePct"),
@@ -105,6 +106,8 @@ let activeDetailsTab = "claims";
 let lastKnownStatus = null;
 let currentThoughtJobId = null;
 let displayedThoughtCount = 0;
+let progressBoxCollapsed = false;
+let userScrolledUp = false;
 
 const RTL_LANGS = new Set(["ar", "fa", "he", "ur"]);
 
@@ -349,12 +352,70 @@ function setSources(ul, sources) {
   }
 }
 
+// Simple markdown parser for progress items
+function parseSimpleMarkdown(text) {
+  let html = text
+    // Escape HTML first
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Headers (## Header)
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Bold (**text** or __text__)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    // Italic (*text* or _text_)
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/_(.+?)_/g, '<em>$1</em>')
+    // Inline code (`code`)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Links [text](url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // Blockquotes (> text)
+    .replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
+    // Unordered lists (- item or * item)
+    .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+    // Numbered lists (1. item)
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Line breaks
+    .replace(/\n\n+/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  
+  // Wrap consecutive <li> items in <ul>
+  html = html.replace(/(<li>.*?<\/li>)(\s*<br>\s*)?(<li>)/g, '$1$3');
+  html = html.replace(/(<li>.*?<\/li>(?:\s*<li>.*?<\/li>)*)/g, '<ul>$1</ul>');
+  
+  // Wrap in paragraph if not starting with block element
+  if (!html.match(/^<(h[1-6]|ul|ol|blockquote|p)/)) {
+    html = '<p>' + html + '</p>';
+  }
+  
+  // Clean up empty paragraphs
+  html = html.replace(/<p><\/p>/g, '').replace(/<p>\s*<\/p>/g, '');
+  
+  return html;
+}
+
 function resetThoughtSummaries() {
   currentThoughtJobId = null;
   displayedThoughtCount = 0;
+  userScrolledUp = false;
+  progressBoxCollapsed = false;
   if (els.thoughtsList) els.thoughtsList.innerHTML = "";
   setText(els.thoughtsCount, "0");
   setHidden(els.thoughtsBox, true);
+  if (els.thoughtsBox) {
+    els.thoughtsBox.classList.remove("collapsed", "active");
+  }
+}
+
+function collapseProgressBox(collapse) {
+  progressBoxCollapsed = collapse;
+  if (els.thoughtsBox) {
+    els.thoughtsBox.classList.toggle("collapsed", collapse);
+  }
 }
 
 function updateThoughtSummaries(job, jobId) {
@@ -363,6 +424,7 @@ function updateThoughtSummaries(job, jobId) {
   if (currentThoughtJobId !== jobId) {
     currentThoughtJobId = jobId;
     displayedThoughtCount = 0;
+    userScrolledUp = false;
     els.thoughtsList.innerHTML = "";
   }
 
@@ -371,26 +433,55 @@ function updateThoughtSummaries(job, jobId) {
 
   if (!summaries.length) {
     setHidden(els.thoughtsBox, true);
+    els.thoughtsBox.classList.remove("active");
     return;
   }
 
   const listEl = els.thoughtsList;
-  const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
 
   setHidden(els.thoughtsBox, false);
+  els.thoughtsBox.classList.add("active");
+  
+  // Remove 'latest' and 'new-item' class from previous items
+  const prevLatest = listEl.querySelectorAll(".progress-item.latest, .progress-item.new-item");
+  prevLatest.forEach(el => {
+    el.classList.remove("latest", "new-item");
+  });
+
+  // Add new items one by one at the TOP (prepend)
   for (let i = displayedThoughtCount; i < summaries.length; i++) {
     const text = String(summaries[i] ?? "").trim();
     if (!text) continue;
+    
     const item = document.createElement("div");
-    item.className = "thought-item";
+    item.className = "progress-item latest new-item";
     item.setAttribute("dir", "auto");
-    item.textContent = text;
-    listEl.appendChild(item);
+    
+    // Create content wrapper for markdown
+    const contentWrapper = document.createElement("div");
+    contentWrapper.className = "progress-item-content";
+    contentWrapper.innerHTML = parseSimpleMarkdown(text);
+    item.appendChild(contentWrapper);
+    
+    // Add timestamp
+    const timeEl = document.createElement("span");
+    timeEl.className = "progress-item-time";
+    timeEl.textContent = new Date().toLocaleTimeString();
+    item.appendChild(timeEl);
+    
+    // Prepend to list so newest is at top
+    listEl.insertBefore(item, listEl.firstChild);
+    
+    // Remove new-item class after animation completes
+    setTimeout(() => {
+      item.classList.remove("new-item");
+    }, 700);
   }
   displayedThoughtCount = summaries.length;
 
-  if (nearBottom) {
-    listEl.scrollTop = listEl.scrollHeight;
+  // Auto-scroll to top (where latest item is) only if user hasn't scrolled down
+  if (!userScrolledUp) {
+    listEl.scrollTop = 0;
   }
 }
 
@@ -688,6 +779,13 @@ function scoreColor(score) {
 
 function renderResult(job) {
   setHidden(els.resultCard, false);
+  
+  // Auto-collapse progress box when showing results
+  collapseProgressBox(true);
+  if (els.thoughtsBox) {
+    els.thoughtsBox.classList.remove("active");
+  }
+  
   currentReportLanguage = job.output_language || currentReportLanguage || selectedLanguage.code;
   applyOutputDirection();
   setDetailsTab(activeDetailsTab || "claims");
@@ -1001,6 +1099,8 @@ async function runAnalysis({ force }) {
   setHidden(els.errorBox, true);
   setHidden(els.infoBox, true);
   resetThoughtSummaries();
+  progressBoxCollapsed = false;
+  userScrolledUp = false;
   
   if (els.statusText) els.statusText.textContent = "Queued";
   lastKnownStatus = "queued";
@@ -1060,6 +1160,8 @@ function startNewAnalysis() {
   resetThoughtSummaries();
   setProgress(0);
   statusSteps.forEach(step => step.classList.remove('active', 'completed'));
+  progressBoxCollapsed = false;
+  userScrolledUp = false;
   
   // Reset state
   lastSubmittedUrl = "";
@@ -1120,6 +1222,19 @@ els.historyRefresh?.addEventListener("click", async () => {
 els.tabClaims?.addEventListener("click", () => setDetailsTab("claims"));
 els.tabSources?.addEventListener("click", () => setDetailsTab("sources"));
 els.tabTranscript?.addEventListener("click", () => setDetailsTab("transcript"));
+
+// Progress box toggle (collapse/expand)
+els.progressToggle?.addEventListener("click", () => {
+  collapseProgressBox(!progressBoxCollapsed);
+});
+
+// Track if user scrolled down to see older items
+els.thoughtsList?.addEventListener("scroll", () => {
+  const listEl = els.thoughtsList;
+  // If scrollTop > 0, user has scrolled down to see older items
+  // We want to stop auto-scrolling to top if user is reading
+  userScrolledUp = listEl.scrollTop > 30;
+});
 
 // ============================================
 // Initialize
