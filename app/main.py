@@ -23,7 +23,13 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "initial_job_id": ""})
+
+
+@app.get("/r/{job_id}", response_class=HTMLResponse)
+async def run_page(request: Request, job_id: str):
+    # Per-run shareable page. The frontend will load job details via /api/jobs/{job_id}.
+    return templates.TemplateResponse("index.html", {"request": request, "initial_job_id": job_id})
 
 
 @app.post("/api/analyze")

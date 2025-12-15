@@ -175,22 +175,33 @@ class JobStore:
         async with self._lock:
             cache_key = self._cache_key(url, output_language)
             lang = (output_language or "").strip().lower() or "ar"
+            has_gemini_key = bool((getattr(settings, "gemini_api_key", "") or "").strip())
 
             # Check for exact match (same URL + same language)
             if not force:
                 cached_id = self._index.get(cache_key)
                 if cached_id:
-                    job = self._jobs.get(cached_id) or self._load_job_from_disk(cached_id)
-                    if job and job.status != "failed":
-                        self._jobs[cached_id] = job
-                        return job, True
+                    cached_job = self._jobs.get(cached_id) or self._load_job_from_disk(cached_id)
+                    if cached_job and cached_job.status != "failed":
+                        # If this is a translation job, ensure it's based on the latest completed run for this URL.
+                        # Otherwise language switching can "stick" to an old translation even after a re-run.
+                        if cached_job.translate_from_job_id and has_gemini_key:
+                            latest = self._find_completed_job_for_url(url)
+                            if latest and latest.id != cached_job.translate_from_job_id:
+                                # Stale translation: fall through and create a new translation job from the latest run.
+                                pass
+                            else:
+                                self._jobs[cached_id] = cached_job
+                                return cached_job, True
+                        else:
+                            self._jobs[cached_id] = cached_job
+                            return cached_job, True
 
             # If not forcing and no exact match, check if we have a completed report in another language
-            # that we can translate instead of doing full analysis
+            # that we can translate instead of doing full analysis.
             translate_from_job: Optional[Job] = None
             if not force:
                 existing_job = self._find_completed_job_for_url(url)
-                has_gemini_key = bool((getattr(settings, "gemini_api_key", "") or "").strip())
                 if existing_job and existing_job.output_language != lang and has_gemini_key:
                     translate_from_job = existing_job
 

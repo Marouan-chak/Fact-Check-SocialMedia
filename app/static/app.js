@@ -36,6 +36,7 @@ const els = {
   scorePct: document.getElementById("scorePct"),
   verdictText: document.getElementById("verdictText"),
   generatedAt: document.getElementById("generatedAt"),
+  shareBtn: document.getElementById("shareBtn"),
   rerunBtn: document.getElementById("rerunBtn"),
   reportSummary: document.getElementById("reportSummary"),
   whatsRight: document.getElementById("whatsRight"),
@@ -106,6 +107,8 @@ let activeDetailsTab = "claims";
 let lastKnownStatus = null;
 let currentThoughtJobId = null;
 let displayedThoughtCount = 0;
+let currentJobId = null;
+let pollSeq = 0;
 let progressBoxCollapsed = false;
 let userScrolledUp = false;
 
@@ -150,6 +153,50 @@ function applyOutputDirection() {
 
   if (els.sourcesList) els.sourcesList.setAttribute("dir", "auto");
   if (els.transcript) els.transcript.setAttribute("dir", "auto");
+}
+
+// ============================================
+// Routing (Shareable Run Pages)
+// ============================================
+
+function getJobIdFromLocation() {
+  const m = window.location.pathname.match(/^\/r\/([a-f0-9]+)$/i);
+  if (m && m[1]) return m[1];
+
+  const fromWindow = String(window.__INITIAL_JOB_ID__ || "").trim();
+  if (fromWindow) return fromWindow;
+
+  const params = new URLSearchParams(window.location.search);
+  const q = params.get("job");
+  if (q) return q;
+
+  return null;
+}
+
+function shareUrlForJob(jobId) {
+  if (!jobId) return window.location.href;
+  return `${window.location.origin}/r/${jobId}`;
+}
+
+function navigateToJob(jobId, { replace } = {}) {
+  if (!jobId) return;
+  const next = `/r/${jobId}`;
+  const current = window.location.pathname;
+  if (current === next) return;
+  if (replace) history.replaceState({ jobId }, "", next);
+  else history.pushState({ jobId }, "", next);
+}
+
+function navigateHome({ replace } = {}) {
+  const next = "/";
+  const current = window.location.pathname;
+  if (current === next) return;
+  if (replace) history.replaceState({}, "", next);
+  else history.pushState({}, "", next);
+}
+
+function cancelPolling() {
+  pollSeq += 1;
 }
 
 // ============================================
@@ -728,7 +775,10 @@ async function getJson(url) {
 }
 
 async function pollJob(jobId) {
-  while (true) {
+  const seq = ++pollSeq;
+  currentJobId = jobId;
+
+  while (seq === pollSeq) {
     const job = await getJson(`/api/jobs/${jobId}`);
     lastKnownStatus = job.status;
     if (els.statusText) els.statusText.textContent = humanizeEnum(job.status);
@@ -783,6 +833,7 @@ function scoreColor(score) {
 }
 
 function renderResult(job) {
+  currentJobId = job?.id || currentJobId;
   setHidden(els.resultCard, false);
   
   // Auto-collapse progress box when showing results
@@ -1041,49 +1092,9 @@ function renderHistory(items) {
     openBtn.addEventListener("click", async () => {
       try {
         openBtn.disabled = true;
-        const job = await getJson(`/api/jobs/${item.id}`);
-        setHidden(els.errorBox, true);
-        if (els.url) els.url.value = job.url || "";
-        lastSubmittedUrl = job.url || "";
-        setSelectedLanguageByCode(job.output_language || "ar");
+        await loadJobPage(item.id, { navigate: true });
         if (els.forceRun) els.forceRun.checked = false;
         setHidden(els.historyCard, true);
-        
-        // Check if job is still running
-        const runningStatuses = ["queued", "downloading", "fetching_transcript", "transcribing", "fact_checking", "translating"];
-        if (runningStatuses.includes(job.status)) {
-          // Job is still running - show progress and poll
-          setHidden(els.statusCard, false);
-          setHidden(els.resultCard, true);
-          setHidden(els.infoBox, true);
-          resetThoughtSummaries();
-          progressBoxCollapsed = false;
-          userScrolledUp = false;
-          
-          if (els.statusText) els.statusText.textContent = humanizeEnum(job.status);
-          lastKnownStatus = job.status;
-          setProgress(job.progress || 0);
-          updateThoughtSummaries(job, item.id);
-          
-          // Reset step states based on current progress
-          statusSteps.forEach(step => step.classList.remove('active', 'completed'));
-          updateStatusSteps(job.progress || 0, job.status);
-          
-          showAlert(els.infoBox, "Resuming job from history...");
-          
-          // Start polling
-          await pollJob(item.id);
-        } else if (job.status === "failed") {
-          // Job failed - show error
-          setHidden(els.statusCard, true);
-          setHidden(els.resultCard, true);
-          showAlert(els.errorBox, job.error || "Job failed with unknown error.");
-        } else {
-          // Job completed - show result
-          setHidden(els.statusCard, true);
-          showAlert(els.infoBox, "Loaded from history.");
-          renderResult(job);
-        }
       } catch (e) {
         showAlert(els.errorBox, e?.message || String(e));
       } finally {
@@ -1117,6 +1128,52 @@ async function loadHistory() {
 // ============================================
 // Analysis
 // ============================================
+
+async function loadJobPage(jobId, { navigate = true, replace = false } = {}) {
+  if (!jobId) return;
+  cancelPolling();
+  currentJobId = jobId;
+
+  if (navigate) navigateToJob(jobId, { replace });
+
+  // Ensure UI is visible even when arriving from a share link.
+  setHidden(els.statusCard, false);
+  setHidden(els.resultCard, true);
+  setHidden(els.errorBox, true);
+  setHidden(els.infoBox, true);
+  resetThoughtSummaries();
+
+  if (els.statusText) els.statusText.textContent = "Loading...";
+  lastKnownStatus = null;
+  setProgress(0);
+
+  try {
+    const job = await getJson(`/api/jobs/${jobId}`);
+    currentJobId = job.id || jobId;
+    lastSubmittedUrl = job.url || lastSubmittedUrl;
+    if (els.url) els.url.value = job.url || "";
+    setSelectedLanguageByCode(job.output_language || selectedLanguage.code);
+
+    lastKnownStatus = job.status;
+    if (els.statusText) els.statusText.textContent = humanizeEnum(job.status);
+    setProgress(job.progress);
+    updateThoughtSummaries(job, jobId);
+
+    if (job.status === "failed") {
+      showAlert(els.errorBox, job.error || "Unknown error occurred.");
+      return;
+    }
+
+    if (job.status === "completed") {
+      renderResult(job);
+      return;
+    }
+
+    await pollJob(jobId);
+  } catch (e) {
+    showAlert(els.errorBox, e?.message || String(e));
+  }
+}
 
 async function runAnalysis({ force }) {
   const url = els.url?.value.trim();
@@ -1155,6 +1212,9 @@ async function runAnalysis({ force }) {
       output_language: selectedLanguage.code,
       force: Boolean(force),
     });
+
+    currentJobId = job_id;
+    navigateToJob(job_id);
     
     if (cached) {
       showAlert(els.infoBox, "Loaded from cache. Enable 'Re-run' to refresh.");
@@ -1177,7 +1237,11 @@ async function runAnalysis({ force }) {
 // New Analysis / Reset
 // ============================================
 
-function startNewAnalysis() {
+function startNewAnalysis({ navigate = true } = {}) {
+  cancelPolling();
+  currentJobId = null;
+  if (navigate) navigateHome();
+
   // Clear URL input
   if (els.url) {
     els.url.value = "";
@@ -1239,6 +1303,18 @@ els.rerunBtn?.addEventListener("click", async () => {
   await runAnalysis({ force: true });
 });
 
+els.shareBtn?.addEventListener("click", async () => {
+  const url = shareUrlForJob(currentJobId);
+  try {
+    await navigator.clipboard.writeText(url);
+    showAlert(els.infoBox, "Share link copied.");
+    setHidden(els.errorBox, true);
+  } catch (e) {
+    // Fallback for browsers without clipboard access (or non-HTTPS contexts)
+    window.prompt("Copy this share link:", url);
+  }
+});
+
 if (els.historyToggle && els.historyCard) {
   els.historyToggle.addEventListener("click", async () => {
     const isHidden = els.historyCard.classList.contains("hidden");
@@ -1280,6 +1356,24 @@ els.thoughtsList?.addEventListener("scroll", () => {
 
 // Initialize language dropdown
 renderLangList("");
+
+// If arriving on a shareable run page (/r/{job_id}), load that job automatically.
+(async () => {
+  const jobId = getJobIdFromLocation();
+  if (jobId) {
+    await loadJobPage(jobId, { navigate: false, replace: true });
+  }
+})();
+
+// Handle back/forward navigation between run pages and home.
+window.addEventListener("popstate", () => {
+  const jobId = getJobIdFromLocation();
+  if (jobId) {
+    loadJobPage(jobId, { navigate: false, replace: true });
+  } else {
+    startNewAnalysis({ navigate: false });
+  }
+});
 
 // Add subtle parallax effect to background glows
 document.addEventListener('mousemove', (e) => {

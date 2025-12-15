@@ -284,6 +284,16 @@
               </div>
               <div class="result-actions">
                 <span id="generatedAt" class="generated-time"></span>
+                <button id="shareBtn" class="btn btn-ghost btn-sm" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 8a3 3 0 1 0-2.82-4"/>
+                    <path d="M6 14a3 3 0 1 0 0 6"/>
+                    <path d="M18 16a3 3 0 1 0 0 6"/>
+                    <path d="M8.59 13.51l6.83-3.98"/>
+                    <path d="M8.59 16.49l6.83 3.98"/>
+                  </svg>
+                  Share
+                </button>
                 <button id="rerunBtn" class="btn btn-ghost btn-sm" type="button">
                   <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="23 4 23 10 17 10"/>
@@ -383,6 +393,9 @@
       </footer>
     </main>
 
+    <script>
+      window.__INITIAL_JOB_ID__ = "{{ initial_job_id|default('') }}";
+    </script>
     <script src="/static/app.js"></script>
   </body>
 </html>
