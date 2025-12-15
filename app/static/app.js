@@ -442,11 +442,16 @@ function updateThoughtSummaries(job, jobId) {
   setHidden(els.thoughtsBox, false);
   els.thoughtsBox.classList.add("active");
   
-  // Remove 'latest' and 'new-item' class from previous items
-  const prevLatest = listEl.querySelectorAll(".progress-item.latest, .progress-item.new-item");
-  prevLatest.forEach(el => {
-    el.classList.remove("latest", "new-item");
-  });
+  // Check if there are actually new items to add
+  const hasNewItems = summaries.length > displayedThoughtCount;
+  
+  // Only remove 'latest' from previous items if we're adding new ones
+  if (hasNewItems) {
+    const prevLatest = listEl.querySelectorAll(".progress-item.latest, .progress-item.new-item");
+    prevLatest.forEach(el => {
+      el.classList.remove("latest", "new-item");
+    });
+  }
 
   // Add new items one by one at the TOP (prepend)
   for (let i = displayedThoughtCount; i < summaries.length; i++) {
@@ -1038,14 +1043,47 @@ function renderHistory(items) {
         openBtn.disabled = true;
         const job = await getJson(`/api/jobs/${item.id}`);
         setHidden(els.errorBox, true);
-        setHidden(els.statusCard, true);
         if (els.url) els.url.value = job.url || "";
         lastSubmittedUrl = job.url || "";
         setSelectedLanguageByCode(job.output_language || "ar");
         if (els.forceRun) els.forceRun.checked = false;
-        showAlert(els.infoBox, "Loaded from history.");
-        renderResult(job);
         setHidden(els.historyCard, true);
+        
+        // Check if job is still running
+        const runningStatuses = ["queued", "downloading", "fetching_transcript", "transcribing", "fact_checking", "translating"];
+        if (runningStatuses.includes(job.status)) {
+          // Job is still running - show progress and poll
+          setHidden(els.statusCard, false);
+          setHidden(els.resultCard, true);
+          setHidden(els.infoBox, true);
+          resetThoughtSummaries();
+          progressBoxCollapsed = false;
+          userScrolledUp = false;
+          
+          if (els.statusText) els.statusText.textContent = humanizeEnum(job.status);
+          lastKnownStatus = job.status;
+          setProgress(job.progress || 0);
+          updateThoughtSummaries(job, item.id);
+          
+          // Reset step states based on current progress
+          statusSteps.forEach(step => step.classList.remove('active', 'completed'));
+          updateStatusSteps(job.progress || 0, job.status);
+          
+          showAlert(els.infoBox, "Resuming job from history...");
+          
+          // Start polling
+          await pollJob(item.id);
+        } else if (job.status === "failed") {
+          // Job failed - show error
+          setHidden(els.statusCard, true);
+          setHidden(els.resultCard, true);
+          showAlert(els.errorBox, job.error || "Job failed with unknown error.");
+        } else {
+          // Job completed - show result
+          setHidden(els.statusCard, true);
+          showAlert(els.infoBox, "Loaded from history.");
+          renderResult(job);
+        }
       } catch (e) {
         showAlert(els.errorBox, e?.message || String(e));
       } finally {

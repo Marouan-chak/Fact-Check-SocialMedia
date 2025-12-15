@@ -1209,19 +1209,21 @@ body {
 .progress-item {
   position: relative;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-secondary);
+  color: var(--text-muted);
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   /* No animation on base class - only on new-item */
 }
 
 .progress-item.latest {
-  background: linear-gradient(135deg, rgba(45, 212, 191, 0.1) 0%, rgba(45, 212, 191, 0.02) 100%);
-  border-color: rgba(45, 212, 191, 0.25);
-  color: var(--text-primary);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.12) 0%, rgba(45, 212, 191, 0.04) 100%) !important;
+  border-color: var(--accent) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 0 15px rgba(45, 212, 191, 0.15);
 }
 
 .progress-item.latest::before {
@@ -1233,6 +1235,23 @@ body {
   width: 3px;
   background: var(--accent);
   border-radius: 3px 0 0 3px;
+}
+
+/* Pulsing glow effect on latest item to show it's "active" */
+.progress-item.latest::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  opacity: 0.5;
+  animation: latestPulse 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes latestPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
 }
 
 /* Animation ONLY for newly added items */

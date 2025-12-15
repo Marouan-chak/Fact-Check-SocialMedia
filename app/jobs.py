@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from .config import settings
-from .openai_pipeline import fact_check_transcript_stream, transcribe_audio_mp3, translate_report
+from .openai_pipeline import fact_check_transcript_stream, transcribe_audio_mp3, translate_report, translate_thought
 from .schemas import FactCheckReport, HistoryItem, Job
 from .storage import read_json, write_json, write_model
 from .ytdlp_audio import DownloadError, download_mp3, get_youtube_transcript, is_youtube_url
@@ -434,9 +434,12 @@ class JobStore:
         fake_task = asyncio.create_task(self._fake_progress_fact_check(job.id))
 
         loop = asyncio.get_running_loop()
+        output_lang = job.output_language or "en"
 
         def on_thought(text: str) -> None:
-            asyncio.run_coroutine_threadsafe(self.add_thought_summary(job.id, text), loop)
+            # Translate thought to user's language if not English
+            translated = translate_thought(text, output_lang) if output_lang != "en" else text
+            asyncio.run_coroutine_threadsafe(self.add_thought_summary(job.id, translated), loop)
 
         try:
             report, raw = await asyncio.to_thread(

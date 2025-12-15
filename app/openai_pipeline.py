@@ -539,19 +539,6 @@ def _fact_check_transcript_openai(
 
     report = FactCheckReport.model_validate(report_dict)
     raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
-    if on_thought and not seen_thoughts and isinstance(raw, dict):
-        reasoning = raw.get("reasoning") if isinstance(raw.get("reasoning"), dict) else {}
-        summary = None
-        for k in ("summary", "summary_text"):
-            v = reasoning.get(k)
-            if isinstance(v, str) and v.strip():
-                summary = v.strip()
-                break
-        if summary:
-            try:
-                on_thought(summary)
-            except Exception:
-                pass
     return report, raw
 
 
@@ -921,3 +908,57 @@ Report to translate:
     translated_report = FactCheckReport.model_validate(merged)
     raw.update({"operation": "translation", "target_language": lang_code})
     return translated_report, raw
+
+
+def translate_thought(thought: str, target_language: str) -> str:
+    """
+    Translate and rewrite an AI reasoning thought to the target language using Gemini 2.5 Flash.
+    If target is English or translation fails, returns the original thought.
+    """
+    from .prompts import LANGUAGE_NAME_BY_CODE
+
+    lang_code = (target_language or "").strip().lower() or "en"
+    
+    # Skip translation for English
+    if lang_code == "en":
+        return thought
+    
+    thought_text = (thought or "").strip()
+    if not thought_text:
+        return thought
+    
+    lang_name = LANGUAGE_NAME_BY_CODE.get(lang_code, lang_code)
+    
+    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return thought  # No API key, return original
+    
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception:
+        return thought  # Package not available
+    
+    prompt = f"""\
+Translate this text to {lang_name}. Translate VERBATIM - do not add greetings, introductions, or any extra text. Just translate the content exactly as it is.
+
+Text to translate:
+{thought_text}
+
+Output ONLY the {lang_name} translation, nothing else."""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        config = types.GenerateContentConfig(
+            temperature=0.3,
+            max_output_tokens=2000,
+        )
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=config,
+        )
+        result = (getattr(resp, "text", "") or "").strip()
+        return result if result else thought
+    except Exception:
+        return thought  # On any error, return original
