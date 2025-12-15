@@ -104,6 +104,7 @@ class Job(BaseModel):
     report: Optional[FactCheckReport] = None
     # For translation jobs: reference to the source job being translated
     translate_from_job_id: Optional[str] = Field(None, description="If set, this job translates from another job's report.")
+    thought_summaries: List[str] = Field(default_factory=list, description="Incremental thought/reasoning summaries emitted while fact-checking.")
 
 
 class HistoryItem(BaseModel):

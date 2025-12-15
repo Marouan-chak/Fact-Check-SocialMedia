@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -8,7 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from .config import settings
-from .openai_pipeline import fact_check_transcript, transcribe_audio_mp3, translate_report
+from .openai_pipeline import fact_check_transcript_stream, transcribe_audio_mp3, translate_report
 from .schemas import FactCheckReport, HistoryItem, Job
 from .storage import read_json, write_json, write_model
 from .ytdlp_audio import DownloadError, download_mp3, get_youtube_transcript, is_youtube_url
@@ -267,6 +269,77 @@ class JobStore:
             self._jobs[job_id] = updated
             write_model(self._job_path(job_id), updated)
 
+    async def add_thought_summary(self, job_id: str, text: str) -> None:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+
+        async with self._lock:
+            job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
+            if not job:
+                return
+
+            summaries = list(job.thought_summaries or [])
+            if summaries and summaries[-1].strip() == cleaned:
+                return
+            summaries.append(cleaned)
+
+            updated = job.model_copy(update={"thought_summaries": summaries, "updated_at": datetime.now(tz=timezone.utc)})
+            self._jobs[job_id] = updated
+            write_model(self._job_path(job_id), updated)
+
+    async def _fake_progress_fact_check(self, job_id: str) -> None:
+        """
+        Fake progress while the model is thinking during fact_checking:
+        30->90 in 5min, 90->95 in next 5min, 95->99 in next 10min.
+        """
+        start = time.monotonic()
+        while True:
+            job = await self.get(job_id)
+            if not job or job.status != "fact_checking":
+                return
+
+            elapsed = time.monotonic() - start
+            if elapsed <= 300:
+                target = 30 + (90 - 30) * (elapsed / 300)
+            elif elapsed <= 600:
+                target = 90 + (95 - 90) * ((elapsed - 300) / 300)
+            elif elapsed <= 1200:
+                target = 95 + (99 - 95) * ((elapsed - 600) / 600)
+            else:
+                target = 99
+
+            target_i = int(round(target))
+            target_i = max(30, min(99, target_i))
+            if target_i > (job.progress or 0):
+                await self.update(job_id, progress=target_i)
+
+            await asyncio.sleep(2)
+
+    async def _fake_progress_translation(self, job_id: str) -> None:
+        """
+        Fake progress for translation jobs: 0->95 in ~90s (<=2min), then hold.
+        """
+        start = time.monotonic()
+        duration = 90.0
+        while True:
+            job = await self.get(job_id)
+            if not job or job.status != "translating":
+                return
+
+            elapsed = time.monotonic() - start
+            if elapsed >= duration:
+                target = 95
+            else:
+                target = 95 * (elapsed / duration)
+
+            target_i = int(round(target))
+            target_i = max(0, min(95, target_i))
+            if target_i > (job.progress or 0):
+                await self.update(job_id, progress=target_i)
+
+            await asyncio.sleep(1)
+
     async def run_pipeline(self, job_id: str) -> None:
         async with self._lock:
             if job_id in self._running:
@@ -299,7 +372,8 @@ class JobStore:
         if not source_job or not source_job.report:
             raise ValueError(f"Source job {job.translate_from_job_id} not found or has no report")
 
-        await self.update(job.id, status="translating", progress=30, error=None)
+        await self.update(job.id, status="translating", progress=0, error=None)
+        fake_task = asyncio.create_task(self._fake_progress_translation(job.id))
 
         # Copy the transcript from source job
         transcript = source_job.transcript
@@ -310,18 +384,22 @@ class JobStore:
                 transcript = None
         if (transcript or "").strip():
             self._transcript_path(job.id).write_text(transcript, encoding="utf-8")
-            await self.update(job.id, transcript=transcript, progress=50)
+            await self.update(job.id, transcript=transcript)
 
         # Translate the report
-        report, raw = await asyncio.to_thread(
-            translate_report,
-            report=source_job.report,
-            target_language=job.output_language,
-        )
-        write_model(self._report_path(job.id), report)
-        write_json(self._raw_response_path(job.id), raw)
-
-        await self.update(job.id, status="completed", progress=100, report=report)
+        try:
+            report, raw = await asyncio.to_thread(
+                translate_report,
+                report=source_job.report,
+                target_language=job.output_language,
+            )
+            write_model(self._report_path(job.id), report)
+            write_json(self._raw_response_path(job.id), raw)
+            await self.update(job.id, status="completed", progress=100, report=report)
+        finally:
+            fake_task.cancel()
+            with contextlib.suppress(Exception):
+                await fake_task
 
     async def _run_full_pipeline(self, job: Job) -> None:
         """Run full analysis pipeline: download, transcribe, and fact-check."""
@@ -329,7 +407,7 @@ class JobStore:
 
         transcript: Optional[str] = None
         if is_youtube_url(job.url):
-            await self.update(job.id, status="fetching_transcript", progress=10, error=None)
+            await self.update(job.id, status="fetching_transcript", progress=5, error=None)
             transcript = await asyncio.to_thread(
                 get_youtube_transcript,
                 url=job.url,
@@ -347,25 +425,38 @@ class JobStore:
                 cookies_file=settings.ytdlp_cookies_file,
             )
 
-            await self.update(job.id, status="transcribing", progress=40)
+            await self.update(job.id, status="transcribing", progress=20)
             transcript = await asyncio.to_thread(transcribe_audio_mp3, mp3_path)
 
         self._transcript_path(job.id).write_text(transcript, encoding="utf-8")
 
-        await self.update(job.id, status="fact_checking", progress=70, transcript=transcript)
-        report, raw = await asyncio.to_thread(
-            fact_check_transcript,
-            transcript=transcript,
-            url=job.url,
-            output_language=job.output_language,
-        )
-        write_model(self._report_path(job.id), report)
-        write_json(self._raw_response_path(job.id), raw)
+        await self.update(job.id, status="fact_checking", progress=30, transcript=transcript, thought_summaries=[])
+        fake_task = asyncio.create_task(self._fake_progress_fact_check(job.id))
 
-        # Update URL index after successful completion
-        self._update_url_index(job.url, job.id)
+        loop = asyncio.get_running_loop()
 
-        await self.update(job.id, status="completed", progress=100, report=report)
+        def on_thought(text: str) -> None:
+            asyncio.run_coroutine_threadsafe(self.add_thought_summary(job.id, text), loop)
+
+        try:
+            report, raw = await asyncio.to_thread(
+                fact_check_transcript_stream,
+                transcript=transcript,
+                url=job.url,
+                output_language=job.output_language,
+                on_thought=on_thought,
+            )
+            write_model(self._report_path(job.id), report)
+            write_json(self._raw_response_path(job.id), raw)
+
+            # Update URL index after successful completion
+            self._update_url_index(job.url, job.id)
+
+            await self.update(job.id, status="completed", progress=100, report=report)
+        finally:
+            fake_task.cancel()
+            with contextlib.suppress(Exception):
+                await fake_task
 
 
 job_store = JobStore(settings.data_dir)

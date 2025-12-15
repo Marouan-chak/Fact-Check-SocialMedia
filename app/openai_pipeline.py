@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from math import ceil
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 from openai import OpenAI
 
@@ -539,6 +539,19 @@ def _fact_check_transcript_openai(
 
     report = FactCheckReport.model_validate(report_dict)
     raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
+    if on_thought and not seen_thoughts and isinstance(raw, dict):
+        reasoning = raw.get("reasoning") if isinstance(raw.get("reasoning"), dict) else {}
+        summary = None
+        for k in ("summary", "summary_text"):
+            v = reasoning.get(k)
+            if isinstance(v, str) and v.strip():
+                summary = v.strip()
+                break
+        if summary:
+            try:
+                on_thought(summary)
+            except Exception:
+                pass
     return report, raw
 
 
@@ -568,6 +581,189 @@ def _fact_check_transcript_gemini(
     report = FactCheckReport.model_validate(report_dict)
 
     return report, raw
+
+
+def _fact_check_transcript_openai_stream(
+    *,
+    transcript: str,
+    url: Optional[str],
+    output_language: str,
+    on_thought: Optional[Callable[[str], None]] = None,
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    client = _client()
+
+    schema = _tighten_schema(_dereference_json_schema(FactCheckReport.model_json_schema()))
+
+    output_chunks: list[str] = []
+    seen_thoughts: set[str] = set()
+    reasoning_buf = ""
+
+    with client.responses.stream(
+        model=settings.factcheck_model,
+        input=[
+            {"role": "system", "content": FACTCHECK_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": build_factcheck_user_prompt(transcript=transcript, url=url, output_language=output_language),
+            },
+        ],
+        tools=[
+            {
+                "type": "web_search",
+                "user_location": {"type": "approximate"},
+                "search_context_size": "medium",
+            }
+        ],
+        reasoning={"effort": "high", "summary": "auto"},
+        text={
+            "verbosity": "medium",
+            "format": {
+                "type": "json_schema",
+                "name": "fact_check_report",
+                "strict": True,
+                "schema": schema,
+            },
+        },
+        store=True,
+        include=["reasoning.encrypted_content", "web_search_call.action.sources"],
+    ) as stream:
+        for event in stream:
+            event_type = getattr(event, "type", "") or ""
+
+            if event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", None)
+                if isinstance(delta, str) and delta:
+                    output_chunks.append(delta)
+
+            elif "reasoning_summary" in event_type:
+                # OpenAI does not expose raw chain-of-thought, only optional summaries.
+                # Streaming event shapes differ slightly across SDK versions, so we handle
+                # both delta-style and done-style events.
+                if event_type.endswith(".delta"):
+                    delta = getattr(event, "delta", None)
+                    if isinstance(delta, str) and delta:
+                        reasoning_buf += delta
+                elif event_type.endswith(".done"):
+                    text = getattr(event, "text", None)
+                    if not isinstance(text, str) or not text:
+                        part = getattr(event, "part", None)
+                        text = getattr(part, "text", None) if part is not None else None
+                    candidate = (reasoning_buf.strip() or (text or "").strip()).strip()
+                    reasoning_buf = ""
+                    if candidate and candidate not in seen_thoughts:
+                        seen_thoughts.add(candidate)
+                        if on_thought:
+                            try:
+                                on_thought(candidate)
+                            except Exception:
+                                pass
+
+        response = stream.get_final_response()
+
+    output_text = ("".join(output_chunks).strip() or getattr(response, "output_text", None) or "").strip()
+    if not output_text:
+        raise OpenAIError("Empty model output.")
+
+    try:
+        report_dict = json.loads(output_text)
+    except json.JSONDecodeError as e:
+        raise OpenAIError(f"Model did not return valid JSON: {e}") from e
+
+    if "generated_at" not in report_dict:
+        report_dict["generated_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+    _compute_weighted_overall(report_dict)
+
+    report = FactCheckReport.model_validate(report_dict)
+    raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
+    return report, raw
+
+
+def _fact_check_transcript_gemini_stream(
+    *,
+    transcript: str,
+    url: Optional[str],
+    output_language: str,
+    on_thought: Optional[Callable[[str], None]] = None,
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    model = _normalize_transcribe_model(settings.factcheck_model or "")
+
+    prompt = build_factcheck_user_prompt(transcript=transcript, url=url, output_language=output_language)
+    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise FactCheckError("GEMINI_API_KEY is not set (required for Gemini fact checking).")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as e:
+        raise FactCheckError("Gemini fact checking requires the `google-genai` package.") from e
+
+    client = genai.Client(api_key=api_key)
+
+    config = types.GenerateContentConfig(
+        system_instruction=FACTCHECK_SYSTEM_PROMPT,
+        tools=[{"google_search": {}}, {"url_context": {}}],
+        temperature=1.0,
+        thinking_config=types.ThinkingConfig(include_thoughts=True),
+    )
+
+    text_chunks: list[str] = []
+    for chunk in client.models.generate_content_stream(model=model, contents=prompt, config=config):
+        candidates = getattr(chunk, "candidates", None)
+        if not candidates:
+            continue
+        content = getattr(candidates[0], "content", None)
+        parts = getattr(content, "parts", None) if content is not None else None
+        if not parts:
+            continue
+
+        for part in parts:
+            part_text = getattr(part, "text", None)
+            if not isinstance(part_text, str) or not part_text:
+                continue
+            is_thought = bool(getattr(part, "thought", False))
+            if is_thought:
+                if on_thought:
+                    try:
+                        on_thought(part_text.strip())
+                    except Exception:
+                        pass
+            else:
+                text_chunks.append(part_text)
+
+    output_text = "".join(text_chunks).strip()
+    report_dict = _parse_json_relaxed(output_text)
+    if not isinstance(report_dict, dict):
+        raise FactCheckError("Gemini did not return a JSON object.")
+
+    if "generated_at" not in report_dict:
+        report_dict["generated_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+    _compute_weighted_overall(report_dict)
+    report = FactCheckReport.model_validate(report_dict)
+    raw: dict[str, Any] = {"provider": "gemini", "model": model}
+    return report, raw
+
+
+def fact_check_transcript_stream(
+    *,
+    transcript: str,
+    url: Optional[str] = None,
+    output_language: str = "ar",
+    on_thought: Optional[Callable[[str], None]] = None,
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    """
+    Fact-check transcript while emitting incremental thought/reasoning summaries via `on_thought`.
+    """
+    model = (settings.factcheck_model or "").strip()
+    if _is_gemini_model(model):
+        return _fact_check_transcript_gemini_stream(
+            transcript=transcript, url=url, output_language=output_language, on_thought=on_thought
+        )
+    return _fact_check_transcript_openai_stream(
+        transcript=transcript, url=url, output_language=output_language, on_thought=on_thought
+    )
 
 
 def transcribe_audio_mp3(mp3_path: Path) -> str:

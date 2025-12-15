@@ -27,6 +27,9 @@ const els = {
   progressBar: document.getElementById("progressBar"),
   infoBox: document.getElementById("infoBox"),
   errorBox: document.getElementById("errorBox"),
+  thoughtsBox: document.getElementById("thoughtsBox"),
+  thoughtsList: document.getElementById("thoughtsList"),
+  thoughtsCount: document.getElementById("thoughtsCount"),
   resultCard: document.getElementById("resultCard"),
   scoreCircle: document.getElementById("scoreCircle"),
   scorePct: document.getElementById("scorePct"),
@@ -99,6 +102,9 @@ let selectedLanguage = LANGUAGES[0];
 let lastSubmittedUrl = "";
 let currentReportLanguage = null;
 let activeDetailsTab = "claims";
+let lastKnownStatus = null;
+let currentThoughtJobId = null;
+let displayedThoughtCount = 0;
 
 const RTL_LANGS = new Set(["ar", "fa", "he", "ur"]);
 
@@ -184,26 +190,65 @@ function setProgress(pct) {
   }
   
   // Update status steps based on progress
-  updateStatusSteps(pct);
+  updateStatusSteps(pct, lastKnownStatus);
 }
 
-function updateStatusSteps(pct) {
-  const steps = ['download', 'transcribe', 'analyze', 'report'];
-  const thresholds = [0, 25, 50, 75];
-  
-  statusSteps.forEach((step, index) => {
-    const stepName = step.dataset.step;
-    const stepIndex = steps.indexOf(stepName);
-    
-    step.classList.remove('active', 'completed');
-    
-    if (pct >= 100) {
-      step.classList.add('completed');
-    } else if (pct >= thresholds[stepIndex] && pct < (thresholds[stepIndex + 1] || 100)) {
-      step.classList.add('active');
-    } else if (pct > thresholds[stepIndex]) {
-      step.classList.add('completed');
+function updateStatusSteps(pct, status) {
+  const statusStr = String(status || "").toLowerCase();
+
+  const states = {
+    download: "",
+    transcribe: "",
+    analyze: "",
+    report: "",
+  };
+
+  if (statusStr === "completed" || Number(pct) >= 100) {
+    states.download = "completed";
+    states.transcribe = "completed";
+    states.analyze = "completed";
+    states.report = "completed";
+  } else if (statusStr === "fact_checking" || statusStr === "translating") {
+    states.download = "completed";
+    states.transcribe = "completed";
+    states.analyze = "active";
+  } else if (statusStr === "transcribing") {
+    states.download = "completed";
+    states.transcribe = "active";
+  } else if (statusStr === "downloading" || statusStr === "fetching_transcript" || statusStr === "queued") {
+    states.download = "active";
+  } else if (statusStr === "failed") {
+    const p = Number(pct) || 0;
+    if (p < 15) {
+      states.download = "active";
+    } else if (p < 30) {
+      states.download = "completed";
+      states.transcribe = "active";
+    } else {
+      states.download = "completed";
+      states.transcribe = "completed";
+      states.analyze = "active";
     }
+  } else {
+    const p = Number(pct) || 0;
+    if (p < 10) {
+      states.download = "active";
+    } else if (p < 30) {
+      states.download = "completed";
+      states.transcribe = "active";
+    } else {
+      states.download = "completed";
+      states.transcribe = "completed";
+      states.analyze = "active";
+    }
+  }
+
+  statusSteps.forEach((step) => {
+    step.classList.remove("active", "completed");
+    const name = step.dataset.step;
+    const st = states[name];
+    if (st === "completed") step.classList.add("completed");
+    if (st === "active") step.classList.add("active");
   });
 }
 
@@ -301,6 +346,51 @@ function setSources(ul, sources) {
     a.textContent = `${pub}${s.title}`;
     li.appendChild(a);
     ul.appendChild(li);
+  }
+}
+
+function resetThoughtSummaries() {
+  currentThoughtJobId = null;
+  displayedThoughtCount = 0;
+  if (els.thoughtsList) els.thoughtsList.innerHTML = "";
+  setText(els.thoughtsCount, "0");
+  setHidden(els.thoughtsBox, true);
+}
+
+function updateThoughtSummaries(job, jobId) {
+  if (!els.thoughtsBox || !els.thoughtsList) return;
+
+  if (currentThoughtJobId !== jobId) {
+    currentThoughtJobId = jobId;
+    displayedThoughtCount = 0;
+    els.thoughtsList.innerHTML = "";
+  }
+
+  const summaries = Array.isArray(job?.thought_summaries) ? job.thought_summaries : [];
+  setText(els.thoughtsCount, String(summaries.length || 0));
+
+  if (!summaries.length) {
+    setHidden(els.thoughtsBox, true);
+    return;
+  }
+
+  const listEl = els.thoughtsList;
+  const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
+
+  setHidden(els.thoughtsBox, false);
+  for (let i = displayedThoughtCount; i < summaries.length; i++) {
+    const text = String(summaries[i] ?? "").trim();
+    if (!text) continue;
+    const item = document.createElement("div");
+    item.className = "thought-item";
+    item.setAttribute("dir", "auto");
+    item.textContent = text;
+    listEl.appendChild(item);
+  }
+  displayedThoughtCount = summaries.length;
+
+  if (nearBottom) {
+    listEl.scrollTop = listEl.scrollHeight;
   }
 }
 
@@ -544,8 +634,10 @@ async function getJson(url) {
 async function pollJob(jobId) {
   while (true) {
     const job = await getJson(`/api/jobs/${jobId}`);
+    lastKnownStatus = job.status;
     if (els.statusText) els.statusText.textContent = humanizeEnum(job.status);
     setProgress(job.progress);
+    updateThoughtSummaries(job, jobId);
 
     if (job.status === "failed") {
       showAlert(els.errorBox, job.error || "Unknown error occurred.");
@@ -908,14 +1000,16 @@ async function runAnalysis({ force }) {
   setHidden(els.resultCard, true);
   setHidden(els.errorBox, true);
   setHidden(els.infoBox, true);
+  resetThoughtSummaries();
   
   if (els.statusText) els.statusText.textContent = "Queued";
-  setProgress(0);
+  lastKnownStatus = "queued";
   
   // Reset step states
   statusSteps.forEach(step => {
     step.classList.remove('active', 'completed');
   });
+  setProgress(0);
 
   try {
     const { job_id, cached, is_translation } = await postJson("/api/analyze", {
@@ -963,12 +1057,14 @@ function startNewAnalysis() {
   setHidden(els.infoBox, true);
   
   // Reset progress
+  resetThoughtSummaries();
   setProgress(0);
   statusSteps.forEach(step => step.classList.remove('active', 'completed'));
   
   // Reset state
   lastSubmittedUrl = "";
   currentReportLanguage = null;
+  lastKnownStatus = null;
   
   // Scroll to top smoothly
   window.scrollTo({ top: 0, behavior: 'smooth' });
