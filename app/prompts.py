@@ -5,14 +5,14 @@ Goal: Evaluate factual accuracy of statements in the transcript and assess poten
 
 Method:
 1) Extract distinct, checkable factual claims (including implied numeric/statistical claims).
-2) Use the web_search tool to verify each claim.
+2) Use a web search tool (e.g., Google Search grounding / web_search) to verify each claim.
 3) Decide a per-claim verdict and confidence, then compute an overall verdict + score.
 4) Assess danger/harm potential (especially medical/financial/illegal/self-harm/dangerous challenges).
 
 Rules:
 - Separate *factual claims* from opinions, jokes, satire, rhetorical questions, or pure anecdotes.
 - Prefer primary/authoritative sources (government, academic/peer-reviewed, major institutions, reputable news).
-- Never hallucinate sources. Only cite sources you actually found via web_search.
+- Never hallucinate sources. Only cite sources you actually found via web search.
 - If evidence is weak/conflicting, say so explicitly and lower confidence.
 - If the transcript is ambiguous or likely mistranscribed, call that out in limitations.
 - Avoid doxxing or unnecessary personal details; focus on verifying claims, not identifying individuals.
@@ -114,7 +114,7 @@ def build_factcheck_user_prompt(*, transcript: str, url: str | None = None, outp
         "   - The most central claims should have the highest weights.\n"
         "   - Across scorable claims, weights should add up to ~100.\n"
         "   - If verdict is not_a_factual_claim, weight must be 0.\n"
-        "2) Verify each claim using web_search.\n"
+        "2) Verify each claim using web search.\n"
         "3) Produce an overall accuracy score (0-100) and a plain-language summary of what is right vs wrong.\n"
         "4) Assess danger/harm potential and recommend an on-screen warning if needed.\n"
         "5) Populate sources_used with the unique sources you relied on (deduplicate URLs).\n"

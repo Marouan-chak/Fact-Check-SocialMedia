@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -303,79 +305,92 @@ def _client() -> OpenAI:
     return OpenAI(api_key=settings.openai_api_key or None)
 
 
-def transcribe_audio_mp3(mp3_path: Path) -> str:
-    duration = _audio_duration_seconds(mp3_path)
-    chunk_seconds = max(60, int(getattr(settings, "transcribe_chunk_seconds", 900) or 900))
-
-    # If duration is unknown, we keep the existing behavior and transcribe as a single file.
-    if duration is None or duration <= chunk_seconds:
-        client = _client()
-        with mp3_path.open("rb") as f:
-            tx = client.audio.transcriptions.create(
-                model=settings.transcribe_model,
-                file=f,
-                response_format="text",
-                prompt=TRANSCRIBE_PROMPT,
-                temperature=1,
-            )
-        if isinstance(tx, str):
-            return tx
-        return getattr(tx, "text", "") or ""
-
-    segments_dir = mp3_path.parent / "segments"
-    parts = _split_mp3_into_segments(mp3_path=mp3_path, out_dir=segments_dir, segment_seconds=chunk_seconds)
-
-    expected_parts = int(ceil(duration / chunk_seconds))
-    parts = parts[: max(1, expected_parts)]
-
-    def transcribe_one(index: int, part_path: Path) -> tuple[int, str]:
-        client = _client()
-        with part_path.open("rb") as f:
-            tx = client.audio.transcriptions.create(
-                model=settings.transcribe_model,
-                file=f,
-                response_format="text",
-                prompt=TRANSCRIBE_PROMPT,
-                temperature=1,
-            )
-        text = tx if isinstance(tx, str) else (getattr(tx, "text", "") or "")
-        return index, (text or "").strip()
-
-    max_workers = max(1, int(getattr(settings, "transcribe_max_workers", 3) or 3))
-    max_workers = min(max_workers, len(parts))
-
-    results: dict[int, str] = {}
-    errors: list[Exception] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(transcribe_one, idx, part): idx for idx, part in enumerate(parts, start=1)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            try:
-                part_idx, text = fut.result()
-            except Exception as e:
-                errors.append(e)
-                continue
-            results[part_idx] = text
-
-    if errors:
-        raise TranscriptionError(f"Chunk transcription failed for {len(errors)} part(s).")
-
-    chunks: list[str] = []
-    total = len(parts)
-    for idx in range(1, total + 1):
-        text = (results.get(idx) or "").strip()
-        if not text:
-            continue
-        chunks.append(text)
-
-    return "\n\n".join(chunks).strip()
+def _is_gemini_model(model: str) -> bool:
+    m = (model or "").strip().lower()
+    return m.startswith("gemini") or m.startswith("models/gemini")
 
 
-def fact_check_transcript(
+def _normalize_transcribe_model(model: str) -> str:
+    raw = (model or "").strip()
+    if not raw:
+        return raw
+
+    key = re.sub(r"\s+", " ", raw).strip().lower()
+    aliases = {
+        "gemini 2.5 flash": "gemini-2.5-flash",
+        "gemini 2.5 pro": "gemini-2.5-pro",
+        "gemini 3.0 preview": "gemini-3-pro-preview",
+        "gemini 3 preview": "gemini-3-pro-preview",
+    }
+    return aliases.get(key, raw)
+
+
+def _transcribe_file(path: Path) -> str:
+    model = _normalize_transcribe_model(settings.transcribe_model or "")
+    if not model:
+        raise TranscriptionError("TRANSCRIBE_MODEL is empty.")
+
+    if _is_gemini_model(model):
+        return _transcribe_file_gemini(path, model=model)
+    return _transcribe_file_openai(path, model=model)
+
+
+def _transcribe_file_openai(path: Path, *, model: str) -> str:
+    client = _client()
+    with path.open("rb") as f:
+        tx = client.audio.transcriptions.create(
+            model=model,
+            file=f,
+            response_format="text",
+            prompt=TRANSCRIBE_PROMPT,
+            temperature=1,
+        )
+    if isinstance(tx, str):
+        return tx
+    return getattr(tx, "text", "") or ""
+
+
+def _transcribe_file_gemini(path: Path, *, model: str) -> str:
+    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise TranscriptionError("GEMINI_API_KEY is not set (required for Gemini transcription).")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as e:
+        raise TranscriptionError("Gemini transcription requires the `google-genai` package.") from e
+
+    client = genai.Client(api_key=api_key)
+    uploaded = None
+    try:
+        uploaded = client.files.upload(file=str(path))
+        prompt = (
+            TRANSCRIBE_PROMPT.strip()
+            + "\n\nReturn only the transcript text. Do not add titles, timestamps, or commentary."
+        )
+        resp = client.models.generate_content(
+            model=model,
+            contents=[prompt, uploaded],
+            config=types.GenerateContentConfig(temperature=1.0),
+        )
+        return (getattr(resp, "text", "") or "").strip()
+    except Exception as e:
+        raise TranscriptionError(f"Gemini transcription failed: {e}") from e
+    finally:
+        try:
+            if uploaded is not None and getattr(uploaded, "name", None):
+                client.files.delete(name=uploaded.name)
+        except Exception:
+            pass
+
+
+def _fact_check_transcript_openai(
     *, transcript: str, url: Optional[str] = None, output_language: str = "ar"
 ) -> Tuple[FactCheckReport, dict[str, Any]]:
     """
-    Returns (report, raw_response_dict) where raw_response_dict includes tool sources when requested.
+    OpenAI fact-checking via Responses API + web_search + strict JSON-schema output.
+    Returns (report, raw_response_dict).
     """
     client = _client()
 
@@ -429,3 +444,118 @@ def fact_check_transcript(
     report = FactCheckReport.model_validate(report_dict)
     raw = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
     return report, raw
+
+
+def _fact_check_transcript_gemini(
+    *, transcript: str, url: Optional[str] = None, output_language: str = "ar"
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    """
+    Gemini fact-checking via Google Search grounding + structured JSON output.
+    Returns (report, raw_response_dict).
+    """
+    model = _normalize_transcribe_model(settings.factcheck_model or "")
+    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise OpenAIError("GEMINI_API_KEY is not set (required for Gemini fact checking).")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as e:
+        raise OpenAIError("Gemini fact checking requires the `google-genai` package.") from e
+
+    client = genai.Client(api_key=api_key)
+    schema = _tighten_schema(_dereference_json_schema(FactCheckReport.model_json_schema()))
+
+    # Gemini supports built-in grounding with Google Search, plus URL Context.
+    config = types.GenerateContentConfig(
+        system_instruction=FACTCHECK_SYSTEM_PROMPT,
+        tools=[{"google_search": {}}, {"url_context": {}}],
+        response_mime_type="application/json",
+        response_json_schema=schema,
+    )
+
+    prompt = build_factcheck_user_prompt(transcript=transcript, url=url, output_language=output_language)
+    resp = client.models.generate_content(model=model, contents=prompt, config=config)
+    output_text = (getattr(resp, "text", "") or "").strip()
+    if not output_text:
+        raise OpenAIError("Empty model output.")
+
+    try:
+        report_dict = json.loads(output_text)
+    except json.JSONDecodeError as e:
+        raise OpenAIError(f"Model did not return valid JSON: {e}") from e
+
+    if "generated_at" not in report_dict:
+        report_dict["generated_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+    _compute_weighted_overall(report_dict)
+    report = FactCheckReport.model_validate(report_dict)
+
+    raw: dict[str, Any] = {"provider": "gemini", "model": model}
+    try:
+        if hasattr(resp, "model_dump"):
+            raw["response"] = resp.model_dump(mode="json")
+    except Exception:
+        pass
+    return report, raw
+
+
+def transcribe_audio_mp3(mp3_path: Path) -> str:
+    duration = _audio_duration_seconds(mp3_path)
+    chunk_seconds = max(60, int(getattr(settings, "transcribe_chunk_seconds", 900) or 900))
+
+    # If duration is unknown, we keep the existing behavior and transcribe as a single file.
+    if duration is None or duration <= chunk_seconds:
+        return _transcribe_file(mp3_path)
+
+    segments_dir = mp3_path.parent / "segments"
+    parts = _split_mp3_into_segments(mp3_path=mp3_path, out_dir=segments_dir, segment_seconds=chunk_seconds)
+
+    expected_parts = int(ceil(duration / chunk_seconds))
+    parts = parts[: max(1, expected_parts)]
+
+    def transcribe_one(index: int, part_path: Path) -> tuple[int, str]:
+        text = _transcribe_file(part_path)
+        return index, (text or "").strip()
+
+    max_workers = max(1, int(getattr(settings, "transcribe_max_workers", 3) or 3))
+    max_workers = min(max_workers, len(parts))
+
+    results: dict[int, str] = {}
+    errors: list[Exception] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(transcribe_one, idx, part): idx for idx, part in enumerate(parts, start=1)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                part_idx, text = fut.result()
+            except Exception as e:
+                errors.append(e)
+                continue
+            results[part_idx] = text
+
+    if errors:
+        raise TranscriptionError(f"Chunk transcription failed for {len(errors)} part(s).")
+
+    chunks: list[str] = []
+    total = len(parts)
+    for idx in range(1, total + 1):
+        text = (results.get(idx) or "").strip()
+        if not text:
+            continue
+        chunks.append(text)
+
+    return "\n\n".join(chunks).strip()
+
+
+def fact_check_transcript(
+    *, transcript: str, url: Optional[str] = None, output_language: str = "ar"
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    """
+    Returns (report, raw_response_dict) where raw_response_dict includes tool sources when requested.
+    """
+    model = (settings.factcheck_model or "").strip()
+    if _is_gemini_model(model):
+        return _fact_check_transcript_gemini(transcript=transcript, url=url, output_language=output_language)
+    return _fact_check_transcript_openai(transcript=transcript, url=url, output_language=output_language)

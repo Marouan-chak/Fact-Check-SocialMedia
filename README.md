@@ -1,6 +1,6 @@
 # Fact-Check Social Media
 End-to-end platform to fact-check social media video audio (Instagram, YouTube, X, etc.):
-1) (YouTube) fetch captions via `yt-dlp` when available, otherwise download audio via `yt-dlp` → 2) transcribe with `gpt-4o-transcribe` → 3) fact-check with `gpt-5.2-2025-12-11` + web search.
+1) (YouTube) fetch captions via `yt-dlp` when available, otherwise download audio via `yt-dlp` → 2) transcribe (OpenAI or Gemini) → 3) fact-check (OpenAI or Gemini) + web search/grounding.
 
 ## Security note (important)
 If you pasted an OpenAI API key into chat, assume it is compromised and **rotate it immediately** in the OpenAI dashboard.
@@ -31,10 +31,17 @@ Open `http://127.0.0.1:8000`.
 - History panel (shows previously analyzed videos)
 - Supports many sites via `yt-dlp` (YouTube, Instagram, X/Twitter, etc.)
 - Weighted scoring (central claims impact the score more than minor claims)
+- Transcription provider switch via `TRANSCRIBE_MODEL`:
+  - OpenAI: `gpt-4o-transcribe` (uses `OPENAI_API_KEY`)
+  - Gemini: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` (uses `GEMINI_API_KEY`)
+- Fact-check provider switch via `FACTCHECK_MODEL`:
+  - OpenAI: `gpt-5.2-2025-12-11` (uses `OPENAI_API_KEY`)
+  - Gemini: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` (uses `GEMINI_API_KEY`)
 
 ## Docker
 ```bash
 export OPENAI_API_KEY=...
+export GEMINI_API_KEY=... # only needed if TRANSCRIBE_MODEL is a Gemini model
 docker compose up --build
 ```
 
