@@ -3,157 +3,366 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fact-Check Social Media</title>
+    <title>VerifyAI — Fact-Check Social Media</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <!-- Animated background -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-glow bg-glow-3"></div>
+
     <main class="container">
-      <header class="header">
-        <div class="headerRow">
-          <div>
-            <h1>Fact-Check Social Media</h1>
-            <p class="muted">
-              Paste a video URL (Instagram, YouTube, X, TikTok, etc.) → download audio → transcribe → fact-check with
-              web search.
-            </p>
-          </div>
-          <button id="historyToggle" class="btn btnSecondary" type="button">History</button>
+      <!-- Header -->
+      <header class="header fade-in">
+        <div class="logo-section">
+          <a href="/" class="logo" id="logoLink" title="Go to home">
+            <svg class="logo-icon" viewBox="0 0 40 40" fill="none">
+              <circle cx="20" cy="20" r="18" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+              <path d="M12 20l5 5 11-11" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="logo-text">Verify<span class="logo-accent">AI</span></span>
+          </a>
+          <p class="tagline">Fact-check any video with AI-powered analysis</p>
+        </div>
+        <div class="header-actions">
+          <button id="newAnalysis" class="btn btn-primary btn-sm" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            <span>New</span>
+          </button>
+          <button id="historyToggle" class="btn btn-ghost" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12,6 12,12 16,14"/>
+            </svg>
+            <span>History</span>
+          </button>
         </div>
       </header>
 
-      <section class="card">
-        <div class="grid2">
-          <div>
-            <label class="label" for="url">Video URL</label>
-            <div class="row">
-              <input id="url" class="input" placeholder="https://www.instagram.com/reel/... or https://youtu.be/..." />
-              <button id="run" class="btn">Analyze</button>
-            </div>
-          </div>
-          <div>
-            <label class="label">Output language</label>
-            <div class="dropdown" id="langDropdown">
-              <button id="langButton" class="dropdownBtn" type="button">
-                <span id="langLabel">Arabic</span>
-                <span class="chev">▾</span>
-              </button>
-              <div id="langMenu" class="dropdownMenu hidden">
-                <input id="langSearch" class="input" placeholder="Search language..." />
-                <div id="langList" class="dropdownList"></div>
-              </div>
-            </div>
-            <label class="check">
-              <input id="forceRun" type="checkbox" />
-              Re-run (overwrite saved result)
+      <!-- Main input card -->
+      <section class="card card-main fade-in delay-1">
+        <div class="card-glow"></div>
+        <div class="input-section">
+          <div class="input-group">
+            <label class="label" for="url">
+              <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              Video URL
             </label>
-          </div>
-        </div>
-      </section>
-
-      <section id="historyCard" class="card hidden">
-        <div class="row space-between">
-          <div>
-            <div class="label">History</div>
-            <div class="muted small">Previously analyzed videos (newest first)</div>
-          </div>
-          <button id="historyRefresh" class="btn btnSecondary" type="button">Refresh</button>
-        </div>
-        <div id="historyList" class="historyList"></div>
-      </section>
-
-      <section id="statusCard" class="card hidden">
-        <div class="row space-between">
-          <div>
-            <div class="label">Status</div>
-            <div id="statusText" class="status">—</div>
-          </div>
-          <div class="pill" id="progressPill">0%</div>
-        </div>
-        <div class="bar">
-          <div id="progressBar" class="barFill" style="width: 0%"></div>
-        </div>
-        <div id="infoBox" class="info hidden"></div>
-        <div id="errorBox" class="error hidden"></div>
-      </section>
-
-      <section id="resultCard" class="card hidden">
-        <div class="resultTop">
-          <div id="scoreCircle" class="scoreCircle" style="--pct: 0; --score-color: var(--accent)">
-            <div class="scoreInner">
-              <div id="scorePct" class="scorePct">0%</div>
-              <div class="scoreLabel">Truthfulness</div>
+            <div class="input-wrapper">
+              <input 
+                id="url" 
+                class="input input-lg" 
+                placeholder="Paste Instagram, YouTube, TikTok, X video link..." 
+                autocomplete="off"
+              />
+              <div class="input-shine"></div>
             </div>
           </div>
-          <div class="resultMeta">
-            <div class="row space-between">
-              <div>
-                <h2 class="h2">Report</h2>
-                <div id="verdictText" class="verdict">—</div>
-                <div id="generatedAt" class="muted small"></div>
+          
+          <div class="controls-row">
+            <div class="control-group">
+              <label class="label">
+                <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="2" y1="12" x2="22" y2="12"/>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+                Output Language
+              </label>
+              <div class="dropdown" id="langDropdown">
+                <button id="langButton" class="dropdown-btn" type="button">
+                  <span id="langLabel">Arabic</span>
+                  <svg class="dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+                <div id="langMenu" class="dropdown-menu hidden">
+                  <input id="langSearch" class="input" placeholder="Search languages..." />
+                  <div id="langList" class="dropdown-list"></div>
+                </div>
               </div>
-              <button id="rerunBtn" class="btn btnSecondary" type="button">Re-run</button>
             </div>
-            <div id="reportSummary" class="summary"></div>
+            
+            <div class="control-group">
+              <label class="checkbox-wrapper">
+                <input id="forceRun" type="checkbox" class="checkbox" />
+                <span class="checkbox-custom">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </span>
+                <span class="checkbox-label">Re-run analysis (overwrite cache)</span>
+              </label>
+            </div>
+            
+            <button id="run" class="btn btn-primary btn-analyze">
+              <span class="btn-text">Analyze</span>
+              <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <div class="btn-loader">
+                <span></span><span></span><span></span>
+              </div>
+            </button>
           </div>
         </div>
-
-        <div class="grid">
-          <div>
-            <h3>What’s right</h3>
-            <ul id="whatsRight"></ul>
+        
+        <div class="supported-platforms">
+          <span class="platforms-label">Supported:</span>
+          <div class="platform-tags">
+            <span class="platform-tag">YouTube</span>
+            <span class="platform-tag">Instagram</span>
+            <span class="platform-tag">TikTok</span>
+            <span class="platform-tag">X (Twitter)</span>
+            <span class="platform-tag">Facebook</span>
           </div>
-          <div>
-            <h3>What’s wrong</h3>
-            <ul id="whatsWrong"></ul>
-          </div>
-        </div>
-
-        <h3>Danger / Harm</h3>
-        <ul id="dangerList"></ul>
-
-        <div class="panelTabs" role="tablist" aria-label="Report details">
-          <button
-            id="tabClaims"
-            class="tabBtn tabBtnActive"
-            type="button"
-            role="tab"
-            aria-selected="true"
-            aria-controls="panelClaims"
-          >
-            Claims (detailed)
-          </button>
-          <button
-            id="tabSources"
-            class="tabBtn"
-            type="button"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panelSources"
-          >
-            Sources used
-          </button>
-          <button
-            id="tabTranscript"
-            class="tabBtn"
-            type="button"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panelTranscript"
-          >
-            Transcript
-          </button>
-        </div>
-
-        <div id="panelClaims" class="panel" role="tabpanel" aria-labelledby="tabClaims">
-          <div id="claimsList" class="claims"></div>
-        </div>
-        <div id="panelSources" class="panel hidden" role="tabpanel" aria-labelledby="tabSources">
-          <ul id="sourcesList"></ul>
-        </div>
-        <div id="panelTranscript" class="panel hidden" role="tabpanel" aria-labelledby="tabTranscript">
-          <pre id="transcript" class="pre"></pre>
         </div>
       </section>
+
+      <!-- History Panel -->
+      <section id="historyCard" class="card card-history hidden">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h2 class="card-title">
+              <svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12,6 12,12 16,14"/>
+              </svg>
+              Analysis History
+            </h2>
+            <p class="card-subtitle">Previously analyzed videos</p>
+          </div>
+          <button id="historyRefresh" class="btn btn-ghost btn-sm" type="button">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
+      <!-- Status/Progress Section -->
+      <section id="statusCard" class="card card-status hidden">
+        <div class="status-header">
+          <div class="status-info">
+            <div class="status-indicator">
+              <div class="status-pulse"></div>
+            </div>
+            <div class="status-text-group">
+              <span class="status-label">Status</span>
+              <span id="statusText" class="status-value">Initializing...</span>
+            </div>
+          </div>
+          <div id="progressPill" class="progress-pill">
+            <span class="progress-value">0</span>%
+          </div>
+        </div>
+        
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar">
+            <div id="progressBar" class="progress-fill"></div>
+            <div class="progress-glow"></div>
+          </div>
+        </div>
+        
+        <div class="status-steps">
+          <div class="step" data-step="download">
+            <div class="step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </div>
+            <span class="step-label">Download</span>
+          </div>
+          <div class="step" data-step="transcribe">
+            <div class="step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </div>
+            <span class="step-label">Transcribe</span>
+          </div>
+          <div class="step" data-step="analyze">
+            <div class="step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+            <span class="step-label">Analyze</span>
+          </div>
+          <div class="step" data-step="report">
+            <div class="step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+            </div>
+            <span class="step-label">Report</span>
+          </div>
+        </div>
+        
+        <div id="infoBox" class="alert alert-info hidden">
+          <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="alert-text"></span>
+        </div>
+        <div id="errorBox" class="alert alert-error hidden">
+          <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          <span class="alert-text"></span>
+        </div>
+      </section>
+
+      <!-- Results Section -->
+      <section id="resultCard" class="card card-result hidden">
+        <!-- Score Hero -->
+        <div class="result-hero">
+          <div class="score-container">
+            <div id="scoreCircle" class="score-ring" style="--pct: 0; --score-color: var(--accent)">
+              <svg class="score-svg" viewBox="0 0 120 120">
+                <circle class="score-bg" cx="60" cy="60" r="54"/>
+                <circle class="score-progress" cx="60" cy="60" r="54"/>
+              </svg>
+              <div class="score-content">
+                <div id="scorePct" class="score-value">0<span class="score-percent">%</span></div>
+                <div class="score-label">Truthfulness</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="result-summary">
+            <div class="result-header">
+              <div>
+                <h2 class="result-title">Fact-Check Report</h2>
+                <div id="verdictText" class="verdict-badge">—</div>
+              </div>
+              <div class="result-actions">
+                <span id="generatedAt" class="generated-time"></span>
+                <button id="rerunBtn" class="btn btn-ghost btn-sm" type="button">
+                  <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                  </svg>
+                  Re-run
+                </button>
+              </div>
+            </div>
+            <p id="reportSummary" class="summary-text"></p>
+          </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="quick-stats">
+          <div class="stat-card stat-right">
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-title">What's Right</span>
+              <ul id="whatsRight" class="stat-list"></ul>
+            </div>
+          </div>
+          <div class="stat-card stat-wrong">
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-title">What's Wrong</span>
+              <ul id="whatsWrong" class="stat-list"></ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Danger Section -->
+        <div class="danger-section" id="dangerSection">
+          <h3 class="section-title">
+            <svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Potential Risks & Harm
+          </h3>
+          <ul id="dangerList" class="danger-list"></ul>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs-container">
+          <div class="tabs" role="tablist" aria-label="Report details">
+            <button id="tabClaims" class="tab tab-active" type="button" role="tab" aria-selected="true" aria-controls="panelClaims">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 11l3 3L22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+              Claims
+            </button>
+            <button id="tabSources" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panelSources">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              Sources
+            </button>
+            <button id="tabTranscript" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panelTranscript">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              Transcript
+            </button>
+          </div>
+          
+          <div id="panelClaims" class="panel" role="tabpanel" aria-labelledby="tabClaims">
+            <div id="claimsList" class="claims-list"></div>
+          </div>
+          <div id="panelSources" class="panel hidden" role="tabpanel" aria-labelledby="tabSources">
+            <ul id="sourcesList" class="sources-list"></ul>
+          </div>
+          <div id="panelTranscript" class="panel hidden" role="tabpanel" aria-labelledby="tabTranscript">
+            <pre id="transcript" class="transcript-pre"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="footer fade-in delay-2">
+        <p>Powered by AI — Results should be verified independently</p>
+      </footer>
     </main>
 
     <script src="/static/app.js"></script>
