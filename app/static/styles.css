@@ -1563,6 +1563,7 @@ body {
   overflow: hidden;
   border-left: 4px solid var(--text-muted);
   transition: all var(--transition-fast);
+  animation: slideIn 0.3s ease-out backwards;
 }
 
 .claim-card[open] {

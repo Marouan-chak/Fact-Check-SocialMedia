@@ -918,7 +918,7 @@ async function runAnalysis({ force }) {
   });
 
   try {
-    const { job_id, cached } = await postJson("/api/analyze", {
+    const { job_id, cached, is_translation } = await postJson("/api/analyze", {
       url,
       output_language: selectedLanguage.code,
       force: Boolean(force),
@@ -926,6 +926,8 @@ async function runAnalysis({ force }) {
     
     if (cached) {
       showAlert(els.infoBox, "Loaded from cache. Enable 'Re-run' to refresh.");
+    } else if (is_translation) {
+      showAlert(els.infoBox, "Translating existing analysis to " + selectedLanguage.name + "...");
     }
     
     await pollJob(job_id);

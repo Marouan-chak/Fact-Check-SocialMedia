@@ -85,6 +85,7 @@ JobStatus = Literal[
     "downloading",
     "transcribing",
     "fact_checking",
+    "translating",
     "completed",
     "failed",
 ]
@@ -101,6 +102,8 @@ class Job(BaseModel):
     error: Optional[str] = None
     transcript: Optional[str] = None
     report: Optional[FactCheckReport] = None
+    # For translation jobs: reference to the source job being translated
+    translate_from_job_id: Optional[str] = Field(None, description="If set, this job translates from another job's report.")
 
 
 class HistoryItem(BaseModel):

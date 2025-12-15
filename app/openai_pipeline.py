@@ -26,6 +26,10 @@ class TranscriptionError(RuntimeError):
     pass
 
 
+class FactCheckError(RuntimeError):
+    pass
+
+
 def _clamp_int(value: Any, *, low: int, high: int, default: int) -> int:
     try:
         n = int(value)
@@ -385,6 +389,98 @@ def _transcribe_file_gemini(path: Path, *, model: str) -> str:
             pass
 
 
+def _parse_json_relaxed(text: str) -> Any:
+    raw = (text or "").strip()
+    if not raw:
+        raise ValueError("Empty JSON text.")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Strip ```json fences if present
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try substring from first { to last }
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError("Failed to parse JSON.")
+
+
+def _gemini_generate_json(
+    *,
+    model: str,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    tools: Optional[list[Any]] = None,
+    temperature: float = 1.0,
+    max_attempts: int = 2,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise FactCheckError("GEMINI_API_KEY is not set.")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as e:
+        raise FactCheckError("Gemini operations require the `google-genai` package.") from e
+
+    client = genai.Client(api_key=api_key)
+
+    last_text = ""
+    last_resp: Any = None
+    for attempt in range(1, max(1, int(max_attempts)) + 1):
+        # Note: Some Gemini tool-calling modes reject response_mime_type='application/json'.
+        # So we only request JSON mime type when no tools are attached (or on a "fix JSON" retry).
+        use_json_mime = not tools or attempt > 1
+        cfg = types.GenerateContentConfig(temperature=float(temperature))
+        if use_json_mime:
+            cfg.response_mime_type = "application/json"
+        if system_instruction:
+            cfg.system_instruction = system_instruction
+        # For retries, we drop tools and just ask the model to output valid JSON.
+        # This avoids tool-calling + JSON-mode incompatibilities and keeps the retry cheap.
+        if tools and attempt == 1:
+            cfg.tools = tools
+
+        resp = client.models.generate_content(model=model, contents=prompt, config=cfg)
+        last_resp = resp
+        last_text = (getattr(resp, "text", "") or "").strip()
+        try:
+            parsed = _parse_json_relaxed(last_text)
+            if not isinstance(parsed, dict):
+                raise ValueError("Expected a JSON object.")
+            raw: dict[str, Any] = {"provider": "gemini", "model": model}
+            try:
+                if hasattr(resp, "model_dump"):
+                    raw["response"] = resp.model_dump(mode="json")
+            except Exception:
+                pass
+            return parsed, raw
+        except Exception:
+            if attempt >= max_attempts:
+                break
+            prompt = (
+                "You MUST return ONLY valid JSON (an object), no markdown, no code fences, no commentary.\n"
+                "Fix the JSON below and return the corrected JSON only:\n\n"
+                f"{last_text}"
+            )
+
+    raise FactCheckError(f"Gemini did not return valid JSON after {max_attempts} attempt(s). Last output: {last_text[:400]}")
+
+
 def _fact_check_transcript_openai(
     *, transcript: str, url: Optional[str] = None, output_language: str = "ar"
 ) -> Tuple[FactCheckReport, dict[str, Any]]:
@@ -454,37 +550,16 @@ def _fact_check_transcript_gemini(
     Returns (report, raw_response_dict).
     """
     model = _normalize_transcribe_model(settings.factcheck_model or "")
-    api_key = (getattr(settings, "gemini_api_key", "") or "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise OpenAIError("GEMINI_API_KEY is not set (required for Gemini fact checking).")
-
-    try:
-        from google import genai
-        from google.genai import types
-    except Exception as e:
-        raise OpenAIError("Gemini fact checking requires the `google-genai` package.") from e
-
-    client = genai.Client(api_key=api_key)
-    schema = _tighten_schema(_dereference_json_schema(FactCheckReport.model_json_schema()))
-
-    # Gemini supports built-in grounding with Google Search, plus URL Context.
-    config = types.GenerateContentConfig(
-        system_instruction=FACTCHECK_SYSTEM_PROMPT,
-        tools=[{"google_search": {}}, {"url_context": {}}],
-        response_mime_type="application/json",
-        response_json_schema=schema,
-    )
 
     prompt = build_factcheck_user_prompt(transcript=transcript, url=url, output_language=output_language)
-    resp = client.models.generate_content(model=model, contents=prompt, config=config)
-    output_text = (getattr(resp, "text", "") or "").strip()
-    if not output_text:
-        raise OpenAIError("Empty model output.")
-
-    try:
-        report_dict = json.loads(output_text)
-    except json.JSONDecodeError as e:
-        raise OpenAIError(f"Model did not return valid JSON: {e}") from e
+    report_dict, raw = _gemini_generate_json(
+        model=model,
+        prompt=prompt,
+        system_instruction=FACTCHECK_SYSTEM_PROMPT,
+        tools=[{"google_search": {}}, {"url_context": {}}],
+        temperature=1.0,
+        max_attempts=2,
+    )
 
     if "generated_at" not in report_dict:
         report_dict["generated_at"] = datetime.now(tz=timezone.utc).isoformat()
@@ -492,12 +567,6 @@ def _fact_check_transcript_gemini(
     _compute_weighted_overall(report_dict)
     report = FactCheckReport.model_validate(report_dict)
 
-    raw: dict[str, Any] = {"provider": "gemini", "model": model}
-    try:
-        if hasattr(resp, "model_dump"):
-            raw["response"] = resp.model_dump(mode="json")
-    except Exception:
-        pass
     return report, raw
 
 
@@ -559,3 +628,100 @@ def fact_check_transcript(
     if _is_gemini_model(model):
         return _fact_check_transcript_gemini(transcript=transcript, url=url, output_language=output_language)
     return _fact_check_transcript_openai(transcript=transcript, url=url, output_language=output_language)
+
+
+def translate_report(
+    *, report: FactCheckReport, target_language: str
+) -> Tuple[FactCheckReport, dict[str, Any]]:
+    """
+    Translate an existing fact-check report to a new language using Gemini Flash 2.5.
+    Returns (translated_report, raw_response_dict).
+    """
+    from .prompts import LANGUAGE_NAME_BY_CODE
+
+    lang_code = (target_language or "").strip().lower() or "ar"
+    lang_name = LANGUAGE_NAME_BY_CODE.get(lang_code, lang_code)
+
+    # Serialize the report to JSON for translation
+    report_json = report.model_dump(mode="json")
+
+    translation_prompt = f"""\
+You are a professional translator. Translate the following fact-check report JSON to {lang_name} (code: {lang_code}).
+
+IMPORTANT RULES:
+1. Translate ONLY the human-readable text fields:
+   - summary
+   - whats_right (list items)
+   - whats_wrong (list items)
+   - missing_context (list items)
+   - For each claim: claim, explanation, correction
+   - For each danger item: description, mitigation
+   - limitations
+2. DO NOT translate or modify:
+   - JSON keys
+   - Enum values (verdicts like "supported", "contradicted", etc.)
+   - URLs
+   - Source titles and publishers (keep as original)
+   - Numeric values (scores, weights, confidence, severity)
+   - Dates
+3. Preserve the exact JSON structure.
+4. Do not add/remove/reorder items in lists (claims, danger, whats_right, whats_wrong, missing_context, sources_used).
+5. Return ONLY valid JSON, no explanation or markdown.
+
+Report to translate:
+{json.dumps(report_json, indent=2, ensure_ascii=False)}
+"""
+
+    translated_dict, raw = _gemini_generate_json(
+        model="gemini-2.5-flash",
+        prompt=translation_prompt,
+        temperature=0.3,
+        max_attempts=2,
+    )
+
+    # Build the translated report by applying translated text fields onto the original report JSON.
+    merged = json.loads(json.dumps(report_json, ensure_ascii=False))
+    merged["generated_at"] = report.generated_at.isoformat()
+
+    def maybe_set_str(key: str) -> None:
+        val = translated_dict.get(key)
+        if isinstance(val, str) and val.strip():
+            merged[key] = val
+
+    def maybe_set_str_list(key: str) -> None:
+        val = translated_dict.get(key)
+        if isinstance(val, list) and all(isinstance(x, str) for x in val):
+            merged[key] = val
+
+    maybe_set_str("summary")
+    maybe_set_str_list("whats_right")
+    maybe_set_str_list("whats_wrong")
+    maybe_set_str_list("missing_context")
+    maybe_set_str("limitations")
+
+    src_claims = merged.get("claims") if isinstance(merged.get("claims"), list) else []
+    out_claims = translated_dict.get("claims") if isinstance(translated_dict.get("claims"), list) else []
+    for i in range(min(len(src_claims), len(out_claims))):
+        if not isinstance(src_claims[i], dict) or not isinstance(out_claims[i], dict):
+            continue
+        for k in ("claim", "explanation", "correction"):
+            v = out_claims[i].get(k)
+            if isinstance(v, str):
+                src_claims[i][k] = v
+
+    src_danger = merged.get("danger") if isinstance(merged.get("danger"), list) else []
+    out_danger = translated_dict.get("danger") if isinstance(translated_dict.get("danger"), list) else []
+    for i in range(min(len(src_danger), len(out_danger))):
+        if not isinstance(src_danger[i], dict) or not isinstance(out_danger[i], dict):
+            continue
+        for k in ("description", "mitigation"):
+            v = out_danger[i].get(k)
+            if isinstance(v, str):
+                src_danger[i][k] = v
+
+    merged["overall_score"] = report.overall_score
+    merged["overall_verdict"] = report.overall_verdict
+
+    translated_report = FactCheckReport.model_validate(merged)
+    raw.update({"operation": "translation", "target_language": lang_code})
+    return translated_report, raw

@@ -8,8 +8,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from .config import settings
-from .openai_pipeline import fact_check_transcript, transcribe_audio_mp3
-from .schemas import HistoryItem, Job
+from .openai_pipeline import fact_check_transcript, transcribe_audio_mp3, translate_report
+from .schemas import FactCheckReport, HistoryItem, Job
 from .storage import read_json, write_json, write_model
 from .ytdlp_audio import DownloadError, download_mp3, get_youtube_transcript, is_youtube_url
 
@@ -46,14 +46,57 @@ class JobStore:
         self.base_dir = base_dir
         self.jobs_dir = base_dir / "jobs"
         self.index_path = base_dir / "url_index.json"
+        self.url_only_index_path = base_dir / "url_only_index.json"
         self._lock = asyncio.Lock()
         self._jobs: Dict[str, Job] = {}
-        self._index: Dict[str, str] = {}
+        self._index: Dict[str, str] = {}  # cache_key (url+lang) -> job_id
+        self._url_index: Dict[str, list[str]] = {}  # normalized_url -> [job_ids]
         self._running: set[str] = set()
 
         data = read_json(self.index_path)
         if isinstance(data, dict):
             self._index = {str(k): str(v) for k, v in data.items()}
+
+        # Load URL-only index (maps URL to list of job IDs for any language)
+        url_data = read_json(self.url_only_index_path)
+        if isinstance(url_data, dict):
+            self._url_index = {str(k): list(v) for k, v in url_data.items() if isinstance(v, list)}
+        self._backfill_url_index_from_jobs_dir()
+
+    def _backfill_url_index_from_jobs_dir(self) -> None:
+        """
+        Backfill url_only_index.json by scanning existing jobs on disk.
+        This keeps language-to-language translation working even for jobs created
+        before url_only_index.json existed.
+        """
+        if not self.jobs_dir.exists():
+            return
+
+        changed = False
+        for entry in self.jobs_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            job_path = entry / "job.json"
+            data = read_json(job_path)
+            if not isinstance(data, dict):
+                continue
+            url = str(data.get("url") or "").strip()
+            job_id = str(data.get("id") or entry.name).strip()
+            if not url or not job_id:
+                continue
+
+            normalized = _normalize_url(url)
+            if not normalized:
+                continue
+            if normalized not in self._url_index:
+                self._url_index[normalized] = []
+                changed = True
+            if job_id not in self._url_index[normalized]:
+                self._url_index[normalized].append(job_id)
+                changed = True
+
+        if changed:
+            write_json(self.url_only_index_path, self._url_index)
 
     def _job_dir(self, job_id: str) -> Path:
         return self.jobs_dir / job_id
@@ -86,9 +129,52 @@ class JobStore:
     def _cache_key(url: str, output_language: str) -> str:
         return f"{_normalize_url(url)}||{(output_language or '').strip().lower() or 'ar'}"
 
+    def _find_completed_job_for_url(self, url: str) -> Optional[Job]:
+        """Find any completed job for the same URL (regardless of language)."""
+        normalized = _normalize_url(url)
+        job_ids = list(self._url_index.get(normalized, []))
+
+        # Fallback: derive candidates from url_index.json (url+lang -> job_id) to support older installs
+        # where url_only_index.json might be missing or incomplete.
+        if not job_ids:
+            prefix = f"{normalized}||"
+            for k, v in self._index.items():
+                if str(k).startswith(prefix):
+                    job_ids.append(str(v))
+
+        best: Optional[Job] = None
+        for job_id in job_ids:
+            job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
+            if not job or job.status != "completed" or not job.report:
+                continue
+            is_analysis = not bool(getattr(job, "translate_from_job_id", None))
+            best_is_analysis = best is not None and not bool(getattr(best, "translate_from_job_id", None))
+            if best is None:
+                best = job
+                continue
+            # Prefer full analysis jobs over translated ones; otherwise prefer the most recently updated.
+            if is_analysis and not best_is_analysis:
+                best = job
+                continue
+            if is_analysis == best_is_analysis and job.updated_at > best.updated_at:
+                best = job
+        return best
+
+    def _update_url_index(self, url: str, job_id: str) -> None:
+        """Add job_id to the URL-only index."""
+        normalized = _normalize_url(url)
+        if normalized not in self._url_index:
+            self._url_index[normalized] = []
+        if job_id not in self._url_index[normalized]:
+            self._url_index[normalized].append(job_id)
+        write_json(self.url_only_index_path, self._url_index)
+
     async def find_or_create(self, *, url: str, output_language: str, force: bool = False) -> tuple[Job, bool]:
         async with self._lock:
             cache_key = self._cache_key(url, output_language)
+            lang = (output_language or "").strip().lower() or "ar"
+
+            # Check for exact match (same URL + same language)
             if not force:
                 cached_id = self._index.get(cache_key)
                 if cached_id:
@@ -97,20 +183,31 @@ class JobStore:
                         self._jobs[cached_id] = job
                         return job, True
 
+            # If not forcing and no exact match, check if we have a completed report in another language
+            # that we can translate instead of doing full analysis
+            translate_from_job: Optional[Job] = None
+            if not force:
+                existing_job = self._find_completed_job_for_url(url)
+                has_gemini_key = bool((getattr(settings, "gemini_api_key", "") or "").strip())
+                if existing_job and existing_job.output_language != lang and has_gemini_key:
+                    translate_from_job = existing_job
+
             job_id = uuid4().hex
             now = datetime.now(tz=timezone.utc)
             job = Job(
                 id=job_id,
                 url=url,
-                output_language=(output_language or "").strip().lower() or "ar",
+                output_language=lang,
                 status="queued",
                 created_at=now,
                 updated_at=now,
                 progress=0,
+                translate_from_job_id=translate_from_job.id if translate_from_job else None,
             )
             self._jobs[job_id] = job
             write_model(self._job_path(job_id), job)
             self._index[cache_key] = job_id
+            self._update_url_index(url, job_id)
             write_json(self.index_path, self._index)
             return job, False
 
@@ -183,51 +280,92 @@ class JobStore:
             return
 
         try:
-            audio_dir = self._audio_dir(job_id)
-
-            transcript: Optional[str] = None
-            if is_youtube_url(job.url):
-                await self.update(job_id, status="fetching_transcript", progress=10, error=None)
-                transcript = await asyncio.to_thread(
-                    get_youtube_transcript,
-                    url=job.url,
-                    out_dir=audio_dir,
-                    cookies_file=settings.ytdlp_cookies_file,
-                    prefer_original_language=True,
-                )
-
-            if not (transcript or "").strip():
-                await self.update(job_id, status="downloading", progress=10, error=None)
-                mp3_path = await asyncio.to_thread(
-                    download_mp3,
-                    url=job.url,
-                    out_dir=audio_dir,
-                    cookies_file=settings.ytdlp_cookies_file,
-                )
-
-                await self.update(job_id, status="transcribing", progress=40)
-                transcript = await asyncio.to_thread(transcribe_audio_mp3, mp3_path)
-
-            self._transcript_path(job_id).write_text(transcript, encoding="utf-8")
-
-            await self.update(job_id, status="fact_checking", progress=70, transcript=transcript)
-            report, raw = await asyncio.to_thread(
-                fact_check_transcript,
-                transcript=transcript,
-                url=job.url,
-                output_language=job.output_language,
-            )
-            write_model(self._report_path(job_id), report)
-            write_json(self._raw_response_path(job_id), raw)
-
-            await self.update(job_id, status="completed", progress=100, report=report)
+            # Check if this is a translation job
+            if job.translate_from_job_id:
+                await self._run_translation_pipeline(job)
+            else:
+                await self._run_full_pipeline(job)
         except DownloadError as e:
-            await self.update(job_id, status="failed", progress=100, error=f"Download failed: {e}")
+            await self.update(job.id, status="failed", progress=100, error=f"Download failed: {e}")
         except Exception as e:
-            await self.update(job_id, status="failed", progress=100, error=str(e))
+            await self.update(job.id, status="failed", progress=100, error=str(e))
         finally:
             async with self._lock:
                 self._running.discard(job_id)
+
+    async def _run_translation_pipeline(self, job: Job) -> None:
+        """Run translation-only pipeline: translate existing report to new language."""
+        source_job = await self.get(job.translate_from_job_id)
+        if not source_job or not source_job.report:
+            raise ValueError(f"Source job {job.translate_from_job_id} not found or has no report")
+
+        await self.update(job.id, status="translating", progress=30, error=None)
+
+        # Copy the transcript from source job
+        transcript = source_job.transcript
+        if not (transcript or "").strip():
+            try:
+                transcript = self._transcript_path(source_job.id).read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                transcript = None
+        if (transcript or "").strip():
+            self._transcript_path(job.id).write_text(transcript, encoding="utf-8")
+            await self.update(job.id, transcript=transcript, progress=50)
+
+        # Translate the report
+        report, raw = await asyncio.to_thread(
+            translate_report,
+            report=source_job.report,
+            target_language=job.output_language,
+        )
+        write_model(self._report_path(job.id), report)
+        write_json(self._raw_response_path(job.id), raw)
+
+        await self.update(job.id, status="completed", progress=100, report=report)
+
+    async def _run_full_pipeline(self, job: Job) -> None:
+        """Run full analysis pipeline: download, transcribe, and fact-check."""
+        audio_dir = self._audio_dir(job.id)
+
+        transcript: Optional[str] = None
+        if is_youtube_url(job.url):
+            await self.update(job.id, status="fetching_transcript", progress=10, error=None)
+            transcript = await asyncio.to_thread(
+                get_youtube_transcript,
+                url=job.url,
+                out_dir=audio_dir,
+                cookies_file=settings.ytdlp_cookies_file,
+                prefer_original_language=True,
+            )
+
+        if not (transcript or "").strip():
+            await self.update(job.id, status="downloading", progress=10, error=None)
+            mp3_path = await asyncio.to_thread(
+                download_mp3,
+                url=job.url,
+                out_dir=audio_dir,
+                cookies_file=settings.ytdlp_cookies_file,
+            )
+
+            await self.update(job.id, status="transcribing", progress=40)
+            transcript = await asyncio.to_thread(transcribe_audio_mp3, mp3_path)
+
+        self._transcript_path(job.id).write_text(transcript, encoding="utf-8")
+
+        await self.update(job.id, status="fact_checking", progress=70, transcript=transcript)
+        report, raw = await asyncio.to_thread(
+            fact_check_transcript,
+            transcript=transcript,
+            url=job.url,
+            output_language=job.output_language,
+        )
+        write_model(self._report_path(job.id), report)
+        write_json(self._raw_response_path(job.id), raw)
+
+        # Update URL index after successful completion
+        self._update_url_index(job.url, job.id)
+
+        await self.update(job.id, status="completed", progress=100, report=report)
 
 
 job_store = JobStore(settings.data_dir)

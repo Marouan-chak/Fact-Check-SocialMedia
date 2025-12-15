@@ -39,10 +39,16 @@ async def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not set (required for the selected models).")
     if needs_gemini and not settings.gemini_api_key:
         raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not set (required for the selected models).")
+
     job, cached = await job_store.find_or_create(url=req.url, output_language=req.output_language, force=req.force)
+
+    # Translation jobs always need Gemini API key (uses Gemini Flash 2.5)
+    if job.translate_from_job_id and not settings.gemini_api_key:
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not set (required for translation).")
+
     if job.status not in {"completed", "failed"}:
         asyncio.create_task(job_store.run_pipeline(job.id))
-    return {"job_id": job.id, "cached": cached}
+    return {"job_id": job.id, "cached": cached, "is_translation": bool(job.translate_from_job_id)}
 
 
 @app.get("/api/jobs/{job_id}", response_model=Job)
