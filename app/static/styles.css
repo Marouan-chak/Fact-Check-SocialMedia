@@ -272,13 +272,22 @@ body {
 /* === Cards === */
 .card {
   position: relative;
+  z-index: 1;
   background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-base) 100%);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-xl);
   padding: 24px;
   margin-bottom: 20px;
-  overflow: hidden;
   transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.card-main {
+  overflow: visible;
+  z-index: 100;
+}
+
+.card-main:has(.dropdown-menu:not(.hidden)) {
+  z-index: 200;
 }
 
 .card::before {
@@ -299,6 +308,9 @@ body {
   opacity: 0;
   transition: opacity var(--transition-slow);
   pointer-events: none;
+  z-index: -1;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
 }
 
 .card:hover .card-glow {
@@ -440,11 +452,13 @@ body {
   align-items: flex-end;
   gap: 16px;
   flex-wrap: wrap;
+  position: relative;
 }
 
 .control-group {
   flex: 1;
   min-width: 180px;
+  position: relative;
 }
 
 @media (max-width: 768px) {
@@ -461,6 +475,7 @@ body {
 /* === Dropdown === */
 .dropdown {
   position: relative;
+  z-index: 10;
 }
 
 .dropdown-btn {
@@ -501,12 +516,13 @@ body {
   top: calc(100% + 8px);
   left: 0;
   width: 100%;
-  z-index: 100;
+  min-width: 220px;
+  z-index: 9999;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 12px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-default);
   animation: slideIn 0.2s ease-out;
 }
 
@@ -721,6 +737,8 @@ body {
 
 /* === Platform Tags === */
 .supported-platforms {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1796,6 +1814,8 @@ body {
 
 /* === Footer === */
 .footer {
+  position: relative;
+  z-index: 1;
   margin-top: 40px;
   padding-top: 24px;
   border-top: 1px solid var(--border-subtle);
