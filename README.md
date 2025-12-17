@@ -1,54 +1,170 @@
-# Fact-Check Social Media
-End-to-end platform to fact-check social media video audio (Instagram, YouTube, X, etc.):
-1) (YouTube) fetch captions via `yt-dlp` when available, otherwise download audio via `yt-dlp` → 2) transcribe (OpenAI or Gemini) → 3) fact-check (OpenAI or Gemini) + web search/grounding.
+# VerifyAI — Fact-Check Social Media
 
-## Security note (important)
-If you pasted an OpenAI API key into chat, assume it is compromised and **rotate it immediately** in the OpenAI dashboard.
+End-to-end platform to fact-check social media videos from YouTube, Instagram, TikTok, X/Twitter, and more.
 
-## Prereqs
-- Python 3.10–3.13 (avoid Python 3.14 beta – it has breaking changes)
-- `ffmpeg` (required by `yt-dlp` for MP3 extraction when captions aren't available)
-  - macOS: `brew install ffmpeg`
+<p align="center">
+  <img src="docs/screenshots/webui.png" alt="VerifyAI Web Interface" width="700">
+</p>
 
-## Setup
+## ✨ Features
+
+- **Multi-platform support** — YouTube, Instagram, TikTok, X/Twitter, Facebook via `yt-dlp`
+- **30+ output languages** — Arabic, English, French, Spanish, and many more
+- **Smart caching** — Results saved per URL+language; re-run to refresh
+- **Weighted scoring** — Central claims impact the score more than minor ones
+- **Claim-by-claim analysis** — Each claim verified with sources and confidence levels
+- **History panel** — Browse and revisit previously analyzed videos
+- **Browser extension** — Analyze videos directly from YouTube/Instagram with one click
+
+### AI Providers
+
+| Function | OpenAI | Gemini |
+|----------|--------|--------|
+| Transcription | `gpt-4o-transcribe` | `gemini-2.5-flash`, `gemini-2.5-pro` |
+| Fact-checking | `gpt-5.2-2025-12-11` | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` |
+
+Configure via `TRANSCRIBE_MODEL` and `FACTCHECK_MODEL` environment variables.
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- `ffmpeg` — required by `yt-dlp` for audio extraction
+  ```bash
+  # macOS
+  brew install ffmpeg
+  
+  # Ubuntu/Debian
+  sudo apt install ffmpeg
+  ```
+
+### Installation
+
 ```bash
-python3.12 -m venv venv312
-source venv312/bin/activate
+git clone https://github.com/user/Fact-Check-SocialMedia.git
+cd Fact-Check-SocialMedia
+
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+
 cp .env.example .env
+# Edit .env with your API keys
 ```
 
-## Run
+### Run
+
 ```bash
 uvicorn app.main:app --reload
 ```
-Open `http://127.0.0.1:8000`.
 
-## Features
-- Output language selector (Arabic/English/French + more)
-- Saved results per URL+language (submit the same URL again to reuse the last report)
-- Optional re-run to overwrite the saved report
-- History panel (shows previously analyzed videos)
-- Supports many sites via `yt-dlp` (YouTube, Instagram, X/Twitter, etc.)
-- Weighted scoring (central claims impact the score more than minor claims)
-- Transcription provider switch via `TRANSCRIBE_MODEL`:
-  - OpenAI: `gpt-4o-transcribe` (uses `OPENAI_API_KEY`)
-  - Gemini: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` (uses `GEMINI_API_KEY`)
-- Fact-check provider switch via `FACTCHECK_MODEL`:
-  - OpenAI: `gpt-5.2-2025-12-11` (uses `OPENAI_API_KEY`)
-  - Gemini: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` (uses `GEMINI_API_KEY`)
-- Optional fact-check thinking level via `FACTCHECK_THINKING_LEVEL`:
-  - OpenAI GPT-5.2: `low | medium | high`
-  - Gemini 3 Pro: `low | high`
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
-## Docker
+### Docker
+
 ```bash
-export OPENAI_API_KEY=...
-export GEMINI_API_KEY=... # only needed if TRANSCRIBE_MODEL is a Gemini model
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...  # optional, only if using Gemini models
 docker compose up --build
 ```
 
-## Notes
-- Downloading content may be restricted by Instagram and/or violate terms for certain URLs. Use only content you have rights to access.
-- For some reels you may need cookies (`YTDLP_COOKIES_FILE`).
-- Long videos: audio is automatically chunked into 15-minute segments (configurable via `TRANSCRIBE_CHUNK_SECONDS`) and transcribed (optionally in parallel via `TRANSCRIBE_MAX_WORKERS`) before fact-checking.
+---
+
+## 📸 Screenshots
+
+### Analysis Results
+
+<p align="center">
+  <img src="docs/screenshots/webui-analysis.png" alt="Fact-Check Analysis Results" width="550">
+</p>
+
+Detailed fact-check report with truthfulness score, claim-by-claim breakdown, and sources.
+
+### Browser Extension
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/video-badge.png" alt="Video Badge" width="250"><br>
+      <em>Verify badge on video player</em>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/sidepanel.png" alt="Side Panel" width="250"><br>
+      <em>Side panel during analysis</em>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/extension.png" alt="Extension Popup" width="250"><br>
+      <em>Extension popup with results</em>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🧩 Browser Extension
+
+The browser extension lets you fact-check videos directly from YouTube, Instagram, and other sites without leaving the page.
+
+### Prerequisites
+
+- Node.js 18+
+- Backend running on `http://127.0.0.1:8000` (configurable in extension settings)
+
+### Build
+
+```bash
+cd extension
+npm install
+
+npm run dev            # Watch mode for Chrome
+npm run build:chrome   # Production Chrome build
+npm run build:firefox  # Production Firefox build
+```
+
+### Chrome
+
+1. Run `npm run dev` or `npm run build:chrome`
+2. Go to `chrome://extensions` → Enable **Developer Mode**
+3. Click **Load unpacked** → Select `extension/dist/chrome`
+4. Navigate to a video and click the VerifyAI badge or toolbar icon
+
+### Firefox
+
+1. Run `npm run build:firefox`
+2. Go to `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on…** → Select `extension/dist/firefox/manifest.json`
+4. Navigate to a video to see the injected badge
+
+### Troubleshooting
+
+- **Stuck at "Analyzing"?** Check your backend `.env` has a valid model (e.g., `FACTCHECK_MODEL=gpt-4o-mini`)
+- **Firefox issues?** Always load from `dist/firefox` (not `src/`) due to `_locales` requirements
+- **Debug logs?** Use `about:debugging` → **Inspect** to open the extension console
+
+---
+
+## ⚠️ Important Notes
+
+### Security
+
+> **API Key Safety**: Never paste API keys in chat or commit them to git. If exposed, rotate immediately in your provider's dashboard.
+
+### Legal & Usage
+
+- Downloading content may be restricted by platforms or violate their terms. Only use content you have rights to access.
+- For some Instagram reels, you may need cookies via `YTDLP_COOKIES_FILE`.
+
+### Long Videos
+
+Audio is automatically chunked into 15-minute segments and transcribed in parallel. Configure with:
+- `TRANSCRIBE_CHUNK_SECONDS` — Segment duration (default: 900)
+- `TRANSCRIBE_MAX_WORKERS` — Parallel transcription workers
+
+---
+
+## 📄 License
+
+MIT

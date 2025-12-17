@@ -1,0 +1,134 @@
+{
+  "extensionName": {
+    "message": "VerifyAI - مدقق حقائق الفيديو",
+    "description": "اسم الإضافة"
+  },
+  "extensionDescription": {
+    "message": "تدقيق الحقائق بالذكاء الاصطناعي لمقاطع فيديو وسائل التواصل الاجتماعي. تحليل مقاطع يوتيوب وإنستغرام وتيك توك وإكس وفيسبوك للكشف عن المعلومات المضللة.",
+    "description": "وصف الإضافة"
+  },
+  "buttonVerify": {
+    "message": "تحقق",
+    "description": "نص زر التحقق"
+  },
+  "buttonFactCheck": {
+    "message": "تدقيق حقائق هذا الفيديو",
+    "description": "نص زر تدقيق الحقائق"
+  },
+  "statusQueued": {
+    "message": "في الانتظار",
+    "description": "الحالة عندما تكون المهمة في الانتظار"
+  },
+  "statusFetchingTranscript": {
+    "message": "جلب النص",
+    "description": "الحالة عند جلب النص"
+  },
+  "statusDownloading": {
+    "message": "جاري التحميل",
+    "description": "الحالة عند تحميل الفيديو"
+  },
+  "statusTranscribing": {
+    "message": "تحويل الصوت لنص",
+    "description": "الحالة عند تحويل الصوت"
+  },
+  "statusAnalyzing": {
+    "message": "جاري التحليل",
+    "description": "الحالة عند تدقيق الحقائق"
+  },
+  "statusTranslating": {
+    "message": "جاري الترجمة",
+    "description": "الحالة عند ترجمة التقرير"
+  },
+  "statusCompleted": {
+    "message": "اكتمل",
+    "description": "الحالة عند انتهاء التحليل"
+  },
+  "statusFailed": {
+    "message": "فشل",
+    "description": "الحالة عند فشل التحليل"
+  },
+  "verdictAccurate": {
+    "message": "دقيق",
+    "description": "الحكم عندما يكون المحتوى دقيقاً"
+  },
+  "verdictMostlyAccurate": {
+    "message": "دقيق في الغالب",
+    "description": "الحكم عندما يكون المحتوى دقيقاً في الغالب"
+  },
+  "verdictMixed": {
+    "message": "مختلط",
+    "description": "الحكم عندما يكون المحتوى مختلط الدقة"
+  },
+  "verdictMisleading": {
+    "message": "مضلل",
+    "description": "الحكم عندما يكون المحتوى مضللاً"
+  },
+  "verdictFalse": {
+    "message": "خاطئ",
+    "description": "الحكم عندما يكون المحتوى خاطئاً"
+  },
+  "verdictUnverifiable": {
+    "message": "غير قابل للتحقق",
+    "description": "الحكم عندما لا يمكن التحقق من المحتوى"
+  },
+  "emptyStateTitle": {
+    "message": "لا يوجد تحليل بعد",
+    "description": "العنوان المعروض عند عدم وجود تحليل"
+  },
+  "emptyStateText": {
+    "message": "انتقل إلى فيديو وانقر على شارة VerifyAI للتحقق من الحقائق.",
+    "description": "النص المعروض عند عدم وجود تحليل"
+  },
+  "settingsTitle": {
+    "message": "إعدادات VerifyAI",
+    "description": "عنوان صفحة الإعدادات"
+  },
+  "settingsBackendUrl": {
+    "message": "رابط الخادم",
+    "description": "تسمية إعداد رابط الخادم"
+  },
+  "settingsLanguage": {
+    "message": "لغة التقرير الافتراضية",
+    "description": "تسمية إعداد اللغة"
+  },
+  "settingsSaved": {
+    "message": "تم حفظ الإعدادات",
+    "description": "الرسالة المعروضة عند حفظ الإعدادات"
+  },
+  "buttonSave": {
+    "message": "حفظ الإعدادات",
+    "description": "نص زر الحفظ"
+  },
+  "buttonReset": {
+    "message": "إعادة التعيين",
+    "description": "نص زر إعادة التعيين"
+  },
+  "buttonShare": {
+    "message": "مشاركة التقرير",
+    "description": "نص زر المشاركة"
+  },
+  "buttonViewFull": {
+    "message": "عرض التقرير الكامل",
+    "description": "نص زر عرض التقرير الكامل"
+  },
+  "claimsTitle": {
+    "message": "تحليل الادعاءات",
+    "description": "عنوان قسم الادعاءات"
+  },
+  "sourcesTitle": {
+    "message": "المصادر",
+    "description": "عنوان قسم المصادر"
+  },
+  "dangerTitle": {
+    "message": "مخاطر محتملة",
+    "description": "عنوان قسم التحذيرات"
+  },
+  "whatsRight": {
+    "message": "ما هو صحيح",
+    "description": "عنوان قسم الادعاءات الصحيحة"
+  },
+  "whatsWrong": {
+    "message": "ما هو خاطئ",
+    "description": "عنوان قسم الادعاءات الخاطئة"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "verifyai-extension",
+  "version": "1.0.0",
+  "description": "AI-powered fact-checking browser extension for social media videos",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:chrome -- --watch",
+    "build": "npm run build:chrome && npm run build:firefox",
+    "build:chrome": "node scripts/build.js chrome",
+    "build:firefox": "node scripts/build.js firefox",
+    "package:chrome": "npm run build:chrome && cd dist/chrome && zip -r ../verifyai-chrome.zip .",
+    "package:firefox": "npm run build:firefox && cd dist/firefox && zip -r ../verifyai-firefox.zip .",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "manifest_version": 3,
+  "name": "VerifyAI - Video Fact-Checker",
+  "version": "1.0.0",
+  "description": "AI-powered fact-checking for social media videos. Analyze YouTube, Instagram, TikTok, X, and Facebook videos for misinformation.",
+  "default_locale": "en",
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://youtu.be/*",
+    "https://www.instagram.com/*",
+    "https://instagram.com/*",
+    "https://www.tiktok.com/*",
+    "https://tiktok.com/*",
+    "https://twitter.com/*",
+    "https://x.com/*",
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
+    "https://fb.watch/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*"
+  ],
+
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtu.be/*",
+        "*://*.instagram.com/*",
+        "*://*.tiktok.com/*",
+        "*://twitter.com/*",
+        "*://x.com/*",
+        "*://*.facebook.com/*",
+        "*://fb.watch/*"
+      ],
+      "js": ["src/content/content-script.js"],
+      "css": ["src/content/ui/badge.css"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_title": "VerifyAI - Fact-Check Videos"
+  },
+
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": false
+  },
+
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

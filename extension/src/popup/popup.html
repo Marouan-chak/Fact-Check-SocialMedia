@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyAI</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <!-- Header -->
+    <header class="header">
+      <img src="../../icons/icon-32.png" alt="VerifyAI" class="header-logo">
+      <h1 class="header-title">VerifyAI</h1>
+    </header>
+
+    <!-- Current Page Section -->
+    <main class="main">
+      <!-- Not a video page -->
+      <div id="notVideoPage" class="section not-video">
+        <div class="not-video-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+            <line x1="7" y1="2" x2="7" y2="22"/>
+            <line x1="17" y1="2" x2="17" y2="22"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <line x1="2" y1="7" x2="7" y2="7"/>
+            <line x1="2" y1="17" x2="7" y2="17"/>
+            <line x1="17" y1="17" x2="22" y2="17"/>
+            <line x1="17" y1="7" x2="22" y2="7"/>
+          </svg>
+        </div>
+        <p class="not-video-text">Navigate to a video page to fact-check</p>
+        <div class="supported-platforms">
+          <span>YouTube</span>
+          <span>Instagram</span>
+          <span>TikTok</span>
+          <span>X</span>
+          <span>Facebook</span>
+        </div>
+      </div>
+
+      <!-- Video detected -->
+      <div id="videoDetected" class="section video-detected hidden">
+        <div class="video-info">
+          <span id="platformBadge" class="platform-badge">YouTube</span>
+          <p id="videoTitle" class="video-title">Video detected</p>
+        </div>
+        <button id="factCheckBtn" class="btn btn-primary btn-large">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4"/>
+            <circle cx="12" cy="12" r="10"/>
+          </svg>
+          Fact-Check This Video
+        </button>
+      </div>
+
+      <!-- Analysis in progress -->
+      <div id="analysisProgress" class="section analysis-progress hidden">
+        <div class="progress-header">
+          <div class="spinner"></div>
+          <span id="progressStatus">Analyzing...</span>
+        </div>
+        <div class="progress-bar">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <span id="progressPercent" class="progress-percent">0%</span>
+        <button id="openPanelBtn" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <line x1="9" y1="3" x2="9" y2="21"/>
+          </svg>
+          Open Side Panel
+        </button>
+      </div>
+
+      <!-- Analysis complete -->
+      <div id="analysisComplete" class="section analysis-complete hidden">
+        <div class="result-card">
+          <div class="result-score">
+            <span id="scoreValue">85</span>
+            <span class="score-suffix">%</span>
+          </div>
+          <div class="result-info">
+            <span id="verdictBadge" class="verdict-badge">Accurate</span>
+            <p id="summaryPreview" class="summary-preview"></p>
+          </div>
+        </div>
+        <div class="result-actions">
+          <button id="viewResultsBtn" class="btn btn-primary">
+            View Full Results
+          </button>
+          <button id="rerunBtn" class="btn btn-secondary btn-icon-only" title="Re-run analysis">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div id="errorState" class="section error-state hidden">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+        </div>
+        <p id="errorMessage" class="error-message">An error occurred</p>
+        <button id="retryBtn" class="btn btn-primary">Try Again</button>
+      </div>
+    </main>
+
+    <!-- Quick Settings -->
+    <div class="quick-settings">
+      <label class="setting-row">
+        <span class="setting-label">Language</span>
+        <select id="languageSelect" class="select">
+          <option value="ar">Arabic</option>
+          <option value="en" selected>English</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="es">Spanish</option>
+          <option value="zh">Chinese</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+          <option value="ru">Russian</option>
+          <option value="pt">Portuguese</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <button id="historyBtn" class="footer-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12,6 12,12 16,14"/>
+        </svg>
+        History
+      </button>
+      <button id="optionsBtn" class="footer-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
