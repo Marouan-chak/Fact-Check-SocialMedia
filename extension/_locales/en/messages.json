@@ -1,0 +1,134 @@
+{
+  "extensionName": {
+    "message": "VerifyAI - Video Fact-Checker",
+    "description": "The name of the extension"
+  },
+  "extensionDescription": {
+    "message": "AI-powered fact-checking for social media videos. Analyze YouTube, Instagram, TikTok, X, and Facebook videos for misinformation.",
+    "description": "The description of the extension"
+  },
+  "buttonVerify": {
+    "message": "Verify",
+    "description": "Text on the verify button"
+  },
+  "buttonFactCheck": {
+    "message": "Fact-Check This Video",
+    "description": "Text on the fact-check button"
+  },
+  "statusQueued": {
+    "message": "Queued",
+    "description": "Status when job is queued"
+  },
+  "statusFetchingTranscript": {
+    "message": "Fetching transcript",
+    "description": "Status when fetching transcript"
+  },
+  "statusDownloading": {
+    "message": "Downloading",
+    "description": "Status when downloading video"
+  },
+  "statusTranscribing": {
+    "message": "Transcribing",
+    "description": "Status when transcribing audio"
+  },
+  "statusAnalyzing": {
+    "message": "Analyzing",
+    "description": "Status when fact-checking"
+  },
+  "statusTranslating": {
+    "message": "Translating",
+    "description": "Status when translating report"
+  },
+  "statusCompleted": {
+    "message": "Completed",
+    "description": "Status when analysis is done"
+  },
+  "statusFailed": {
+    "message": "Failed",
+    "description": "Status when analysis failed"
+  },
+  "verdictAccurate": {
+    "message": "Accurate",
+    "description": "Verdict when content is accurate"
+  },
+  "verdictMostlyAccurate": {
+    "message": "Mostly Accurate",
+    "description": "Verdict when content is mostly accurate"
+  },
+  "verdictMixed": {
+    "message": "Mixed",
+    "description": "Verdict when content has mixed accuracy"
+  },
+  "verdictMisleading": {
+    "message": "Misleading",
+    "description": "Verdict when content is misleading"
+  },
+  "verdictFalse": {
+    "message": "False",
+    "description": "Verdict when content is false"
+  },
+  "verdictUnverifiable": {
+    "message": "Unverifiable",
+    "description": "Verdict when content cannot be verified"
+  },
+  "emptyStateTitle": {
+    "message": "No Analysis Yet",
+    "description": "Title shown when no analysis has been done"
+  },
+  "emptyStateText": {
+    "message": "Navigate to a video and click the VerifyAI badge to fact-check it.",
+    "description": "Text shown when no analysis has been done"
+  },
+  "settingsTitle": {
+    "message": "VerifyAI Settings",
+    "description": "Title of the settings page"
+  },
+  "settingsBackendUrl": {
+    "message": "Backend URL",
+    "description": "Label for backend URL setting"
+  },
+  "settingsLanguage": {
+    "message": "Default Output Language",
+    "description": "Label for language setting"
+  },
+  "settingsSaved": {
+    "message": "Settings saved",
+    "description": "Message shown when settings are saved"
+  },
+  "buttonSave": {
+    "message": "Save Settings",
+    "description": "Text on save button"
+  },
+  "buttonReset": {
+    "message": "Reset to Defaults",
+    "description": "Text on reset button"
+  },
+  "buttonShare": {
+    "message": "Share Report",
+    "description": "Text on share button"
+  },
+  "buttonViewFull": {
+    "message": "View Full Report",
+    "description": "Text on view full report button"
+  },
+  "claimsTitle": {
+    "message": "Claims Analysis",
+    "description": "Title of claims section"
+  },
+  "sourcesTitle": {
+    "message": "Sources",
+    "description": "Title of sources section"
+  },
+  "dangerTitle": {
+    "message": "Potential Risks",
+    "description": "Title of danger warnings section"
+  },
+  "whatsRight": {
+    "message": "What's Right",
+    "description": "Title of correct claims section"
+  },
+  "whatsWrong": {
+    "message": "What's Wrong",
+    "description": "Title of false claims section"
+  }
+}
