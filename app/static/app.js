@@ -755,7 +755,9 @@ function renderClaims(claims) {
 async function postJson(url, body) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -766,7 +768,7 @@ async function postJson(url, body) {
 }
 
 async function getJson(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.detail || `Request failed (${res.status})`);
@@ -812,6 +814,13 @@ function showAlert(alertEl, message) {
   const textEl = alertEl.querySelector('.alert-text');
   if (textEl) textEl.textContent = message;
   setHidden(alertEl, false);
+}
+
+function reportFrontendError(prefix, err) {
+  const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  console.error(prefix, err);
+  setHidden(els.statusCard, false);
+  showAlert(els.errorBox, `${prefix}: ${message}`);
 }
 
 // ============================================
@@ -1196,6 +1205,7 @@ async function runAnalysis({ force }) {
   resetThoughtSummaries();
   progressBoxCollapsed = false;
   userScrolledUp = false;
+  els.statusCard?.scrollIntoView({ behavior: "smooth", block: "start" });
   
   if (els.statusText) els.statusText.textContent = "Queued";
   lastKnownStatus = "queued";
@@ -1356,6 +1366,15 @@ els.thoughtsList?.addEventListener("scroll", () => {
 
 // Initialize language dropdown
 renderLangList("");
+
+// Surface JS errors in the UI (helps when Chrome extensions break clicks/polling).
+window.addEventListener("error", (e) => {
+  reportFrontendError("Frontend error", e?.error || e?.message);
+});
+
+window.addEventListener("unhandledrejection", (e) => {
+  reportFrontendError("Unhandled promise rejection", e?.reason);
+});
 
 // If arriving on a shareable run page (/r/{job_id}), load that job automatically.
 (async () => {

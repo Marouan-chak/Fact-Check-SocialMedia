@@ -20,16 +20,36 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+def _static_version() -> str:
+    latest_mtime_ns = 0
+    for filename in ("app.js", "styles.css"):
+        try:
+            st = (BASE_DIR / "static" / filename).stat()
+            latest_mtime_ns = max(latest_mtime_ns, int(getattr(st, "st_mtime_ns", st.st_mtime * 1e9)))
+        except FileNotFoundError:
+            continue
+    return str(latest_mtime_ns) if latest_mtime_ns else "0"
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "initial_job_id": ""})
+    response = templates.TemplateResponse(
+        "index.html",
+        {"request": request, "initial_job_id": "", "static_version": _static_version()},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/r/{job_id}", response_class=HTMLResponse)
 async def run_page(request: Request, job_id: str):
     # Per-run shareable page. The frontend will load job details via /api/jobs/{job_id}.
-    return templates.TemplateResponse("index.html", {"request": request, "initial_job_id": job_id})
+    response = templates.TemplateResponse(
+        "index.html",
+        {"request": request, "initial_job_id": job_id, "static_version": _static_version()},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.post("/api/analyze")
