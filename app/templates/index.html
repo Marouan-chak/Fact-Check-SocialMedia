@@ -294,6 +294,20 @@
                   </svg>
                   Share
                 </button>
+                <div class="export-dropdown" id="exportDropdown">
+                  <button id="exportBtn" class="btn btn-ghost btn-sm" type="button" aria-haspopup="menu" aria-expanded="false">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span class="btn-text">Export</span>
+                  </button>
+                  <div id="exportMenu" class="export-menu hidden" role="menu" aria-label="Export report">
+                    <button id="exportPdf" class="export-item" type="button" role="menuitem">Export PDF</button>
+                    <button id="exportPng" class="export-item" type="button" role="menuitem">Export PNG</button>
+                  </div>
+                </div>
                 <button id="rerunBtn" class="btn btn-ghost btn-sm" type="button">
                   <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="23 4 23 10 17 10"/>
@@ -396,6 +410,9 @@
     <script>
       window.__INITIAL_JOB_ID__ = "{{ initial_job_id|default('') }}";
     </script>
+    <div id="exportMount" class="export-mount" aria-hidden="true"></div>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="{{ url_for('static', path='/app.js') }}?v={{ static_version|default('0') }}"></script>
   </body>
 </html>

@@ -30,6 +30,14 @@ Rules:
 - Prefer primary/authoritative sources (government, academic/peer-reviewed, major institutions, reputable news).
 - Never hallucinate sources. Only cite sources you actually found via web search.
 - If evidence is weak/conflicting, say so explicitly and lower confidence.
+- Confidence is about strength of *available evidence*, not philosophical certainty. Do not be artificially conservative: if a claim is directly and unambiguously confirmed by strong sources with no credible conflict, it's OK to use confidence = 100.
+- Confidence calibration (0–100) for each claim:
+  - 100: Explicit, unambiguous confirmation by an authoritative primary source (or multiple independent reputable sources) and no credible conflicting evidence found.
+  - 95–99: Very strong support but minor ambiguity, slight wording mismatch, or source is reputable but not primary.
+  - 80–94: Good support but incomplete details, requires small inference, or evidence is somewhat indirect.
+  - 60–79: Limited/partial support, weaker sourcing, or notable uncertainty.
+  - 40–59: Mixed/unclear evidence.
+  - 0–39: Very weak evidence or the claim is contradicted.
 - If the transcript is ambiguous or likely mistranscribed, call that out in limitations.
 - Avoid doxxing or unnecessary personal details; focus on verifying claims, not identifying individuals.
 - IMPORTANT: Every field in the JSON schema is required. Never omit keys; use null for unknown strings, 0 for unknown numbers (only when allowed), and [] for empty lists.

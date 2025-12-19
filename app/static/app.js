@@ -37,6 +37,12 @@ const els = {
   verdictText: document.getElementById("verdictText"),
   generatedAt: document.getElementById("generatedAt"),
   shareBtn: document.getElementById("shareBtn"),
+  exportDropdown: document.getElementById("exportDropdown"),
+  exportBtn: document.getElementById("exportBtn"),
+  exportMenu: document.getElementById("exportMenu"),
+  exportPdf: document.getElementById("exportPdf"),
+  exportPng: document.getElementById("exportPng"),
+  exportMount: document.getElementById("exportMount"),
   rerunBtn: document.getElementById("rerunBtn"),
   reportSummary: document.getElementById("reportSummary"),
   whatsRight: document.getElementById("whatsRight"),
@@ -107,6 +113,7 @@ let activeDetailsTab = "claims";
 let lastKnownStatus = null;
 let currentThoughtJobId = null;
 let displayedThoughtCount = 0;
+let currentJob = null;
 let currentJobId = null;
 let pollSeq = 0;
 let progressBoxCollapsed = false;
@@ -842,6 +849,7 @@ function scoreColor(score) {
 }
 
 function renderResult(job) {
+  currentJob = job || null;
   currentJobId = job?.id || currentJobId;
   setHidden(els.resultCard, false);
   
@@ -944,6 +952,612 @@ function animateNumber(element, start, end, duration) {
 }
 
 // ============================================
+// Export (PDF / PNG)
+// ============================================
+
+function openExportMenu() {
+  setHidden(els.exportMenu, false);
+  els.exportDropdown?.classList.add("open");
+  els.exportBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeExportMenu() {
+  setHidden(els.exportMenu, true);
+  els.exportDropdown?.classList.remove("open");
+  els.exportBtn?.setAttribute("aria-expanded", "false");
+}
+
+function setExportBusy(busy, label) {
+  if (els.exportBtn) {
+    els.exportBtn.disabled = !!busy;
+    const textEl = els.exportBtn.querySelector(".btn-text");
+    if (textEl) {
+      if (busy) {
+        if (!els.exportBtn.dataset.originalText) {
+          els.exportBtn.dataset.originalText = textEl.textContent || "Export";
+        }
+        textEl.textContent = label || "Exporting…";
+      } else {
+        textEl.textContent = els.exportBtn.dataset.originalText || "Export";
+      }
+    }
+  }
+  if (els.exportPdf) els.exportPdf.disabled = !!busy;
+  if (els.exportPng) els.exportPng.disabled = !!busy;
+}
+
+function ensureExportLibs() {
+  const hasCanvas = typeof window.html2canvas === "function";
+  const hasPdf = typeof window.jspdf?.jsPDF === "function";
+  if (!hasCanvas || !hasPdf) {
+    throw new Error("Export libraries failed to load. Refresh the page and try again.");
+  }
+}
+
+function reportExportError(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  console.error("Export error:", err);
+  showAlert(els.errorBox, `Export failed: ${message}`);
+  setHidden(els.infoBox, true);
+}
+
+function exportFileBase(job) {
+  const id = String(job?.id || "report").slice(0, 10).toLowerCase();
+  const generated = job?.report?.generated_at;
+  const date = (() => {
+    if (!generated) return new Date().toISOString().slice(0, 10);
+    const d = new Date(generated);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+  })();
+  return `verifyai-report-${id}-${date}`;
+}
+
+function exportToneForOverallVerdict(v) {
+  const s = String(v || "").toLowerCase();
+  if (s === "accurate" || s === "mostly_accurate") return "good";
+  if (s === "mixed") return "warn";
+  if (s === "misleading" || s === "false") return "bad";
+  return "muted";
+}
+
+function exportToneForClaimVerdict(v) {
+  const s = String(v || "").toLowerCase();
+  if (s === "supported") return "good";
+  if (s === "mixed") return "warn";
+  if (s === "contradicted") return "bad";
+  return "muted";
+}
+
+function buildExportDocument(job) {
+  const report = job?.report || {};
+  const lang = String(job?.output_language || currentReportLanguage || selectedLanguage?.code || "en").toLowerCase();
+  const contentDir = isRtlLanguage(lang) ? "rtl" : "ltr";
+
+  const root = document.createElement("div");
+  root.className = "export-document";
+  root.setAttribute("dir", "ltr");
+  root.setAttribute("lang", "en");
+
+  const header = document.createElement("div");
+  header.className = "export-header";
+
+  const brand = document.createElement("div");
+  brand.className = "export-brand";
+
+  const brandTop = document.createElement("div");
+  brandTop.className = "export-brand-top";
+
+  const product = document.createElement("div");
+  product.className = "export-product";
+  product.textContent = "VerifyAI";
+
+  const docTitle = document.createElement("div");
+  docTitle.className = "export-doc-title";
+  docTitle.textContent = "Fact-Check Report";
+
+  brandTop.appendChild(product);
+  brandTop.appendChild(docTitle);
+
+  const meta = document.createElement("div");
+  meta.className = "export-meta";
+
+  const addMetaRow = (label, value, { dir } = {}) => {
+    if (!value) return;
+    const row = document.createElement("div");
+    row.className = "export-meta-row";
+    const l = document.createElement("div");
+    l.className = "export-meta-label";
+    l.textContent = label;
+    const v = document.createElement("div");
+    v.className = "export-meta-value";
+    if (dir) v.setAttribute("dir", dir);
+    v.textContent = value;
+    row.appendChild(l);
+    row.appendChild(v);
+    meta.appendChild(row);
+  };
+
+  addMetaRow("Generated", (() => {
+    const g = report?.generated_at;
+    if (!g) return "";
+    const d = new Date(g);
+    return Number.isNaN(d.getTime()) ? String(g) : d.toLocaleString();
+  })());
+  addMetaRow("Video URL", String(job?.url || ""), { dir: "ltr" });
+  addMetaRow("Job ID", String(job?.id || ""), { dir: "ltr" });
+  addMetaRow("Language", String(job?.output_language || "").toUpperCase(), { dir: "ltr" });
+
+  brand.appendChild(brandTop);
+  brand.appendChild(meta);
+
+  const scoreCard = document.createElement("div");
+  scoreCard.className = "export-score-card";
+
+  const score = Math.max(0, Math.min(100, Number(report?.overall_score ?? 0)));
+  const verdictLabelText = humanizeEnum(report?.overall_verdict) || "";
+  const tone = exportToneForOverallVerdict(report?.overall_verdict);
+
+  const ring = document.createElement("div");
+  ring.className = "export-score-ring";
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 120 120");
+  svg.setAttribute("class", "export-score-svg");
+
+  const cBg = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  cBg.setAttribute("class", "export-score-bg");
+  cBg.setAttribute("cx", "60");
+  cBg.setAttribute("cy", "60");
+  cBg.setAttribute("r", "54");
+
+  const cFg = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  cFg.setAttribute("class", "export-score-fg");
+  cFg.setAttribute("cx", "60");
+  cFg.setAttribute("cy", "60");
+  cFg.setAttribute("r", "54");
+
+  // circumference for r=54
+  const circumference = 339.292;
+  const dashOffset = circumference * (1 - score / 100);
+  cFg.setAttribute("stroke-dasharray", String(circumference));
+  cFg.setAttribute("stroke-dashoffset", String(dashOffset));
+
+  svg.appendChild(cBg);
+  svg.appendChild(cFg);
+
+  const ringText = document.createElement("div");
+  ringText.className = "export-score-text";
+
+  const scoreValue = document.createElement("div");
+  scoreValue.className = "export-score-value";
+  scoreValue.setAttribute("dir", "ltr");
+  scoreValue.textContent = `${score}%`;
+
+  const scoreSub = document.createElement("div");
+  scoreSub.className = "export-score-sub";
+  scoreSub.textContent = "Overall score";
+
+  ringText.appendChild(scoreValue);
+  ringText.appendChild(scoreSub);
+
+  ring.appendChild(svg);
+  ring.appendChild(ringText);
+
+  const verdictPill = document.createElement("div");
+  verdictPill.className = "export-verdict";
+  verdictPill.dataset.tone = tone;
+  verdictPill.textContent = verdictLabelText || "Unverifiable";
+
+  scoreCard.appendChild(ring);
+  scoreCard.appendChild(verdictPill);
+
+  header.appendChild(brand);
+  header.appendChild(scoreCard);
+  root.appendChild(header);
+
+  const addSection = (titleText) => {
+    const section = document.createElement("section");
+    section.className = "export-section";
+    const title = document.createElement("h2");
+    title.className = "export-section-title";
+    title.textContent = titleText;
+    section.appendChild(title);
+    root.appendChild(section);
+    return section;
+  };
+
+  // Summary
+  const summarySection = addSection("Summary");
+  const summary = document.createElement("p");
+  summary.className = "export-summary";
+  summary.setAttribute("dir", contentDir);
+  summary.setAttribute("lang", lang);
+  summary.textContent = String(report?.summary || "").trim() || "—";
+  summarySection.appendChild(summary);
+
+  // At-a-glance cards
+  const glance = document.createElement("div");
+  glance.className = "export-card-grid";
+
+  const makeCard = (titleText, items, { tone: cardTone } = {}) => {
+    const card = document.createElement("div");
+    card.className = "export-card";
+    if (cardTone) card.dataset.tone = cardTone;
+
+    const title = document.createElement("div");
+    title.className = "export-card-title";
+    title.textContent = titleText;
+    card.appendChild(title);
+
+    const list = document.createElement("ul");
+    list.className = "export-list";
+    list.setAttribute("dir", contentDir);
+    list.setAttribute("lang", lang);
+    const arr = Array.isArray(items) ? items : [];
+    if (!arr.length) {
+      const li = document.createElement("li");
+      li.className = "export-list-empty";
+      li.textContent = "None";
+      list.appendChild(li);
+    } else {
+      for (const it of arr) {
+        const li = document.createElement("li");
+        li.textContent = String(it ?? "");
+        list.appendChild(li);
+      }
+    }
+    card.appendChild(list);
+    return card;
+  };
+
+  glance.appendChild(makeCard("What's right", report?.whats_right || [], { tone: "good" }));
+  glance.appendChild(makeCard("What's wrong", report?.whats_wrong || [], { tone: "bad" }));
+  root.appendChild(glance);
+
+  // Missing context / Limitations
+  const missing = Array.isArray(report?.missing_context) ? report.missing_context : [];
+  const limitations = String(report?.limitations || "").trim();
+  if (missing.length || limitations) {
+    const ctxWrap = document.createElement("div");
+    ctxWrap.className = "export-card-grid export-card-grid_2";
+    if (missing.length) {
+      ctxWrap.appendChild(makeCard("Missing context", missing, { tone: "warn" }));
+    }
+    if (limitations) {
+      const card = document.createElement("div");
+      card.className = "export-card";
+      card.dataset.tone = "muted";
+      const title = document.createElement("div");
+      title.className = "export-card-title";
+      title.textContent = "Limitations";
+      const p = document.createElement("p");
+      p.className = "export-paragraph";
+      p.setAttribute("dir", contentDir);
+      p.setAttribute("lang", lang);
+      p.textContent = limitations;
+      card.appendChild(title);
+      card.appendChild(p);
+      ctxWrap.appendChild(card);
+    }
+    root.appendChild(ctxWrap);
+  }
+
+  // Danger
+  const dangerItems = Array.isArray(report?.danger) ? report.danger : [];
+  if (dangerItems.length) {
+    const dangerSection = addSection("Potential risks & harm");
+    const list = document.createElement("div");
+    list.className = "export-danger-list";
+    for (const d of dangerItems) {
+      const item = document.createElement("div");
+      item.className = "export-danger-item";
+      item.dataset.severity = String(Math.max(0, Math.min(5, Number(d?.severity ?? 0))));
+
+      const head = document.createElement("div");
+      head.className = "export-danger-head";
+
+      const cat = document.createElement("div");
+      cat.className = "export-danger-category";
+      cat.textContent = humanizeEnum(d?.category) || "Other";
+
+      const sev = document.createElement("div");
+      sev.className = "export-danger-severity";
+      sev.setAttribute("dir", "ltr");
+      sev.textContent = `${Math.max(0, Math.min(5, Number(d?.severity ?? 0)))}/5`;
+
+      head.appendChild(cat);
+      head.appendChild(sev);
+
+      const desc = document.createElement("div");
+      desc.className = "export-danger-desc";
+      desc.setAttribute("dir", contentDir);
+      desc.setAttribute("lang", lang);
+      desc.textContent = String(d?.description || "");
+
+      item.appendChild(head);
+      item.appendChild(desc);
+
+      const mitigation = String(d?.mitigation || "").trim();
+      if (mitigation) {
+        const mit = document.createElement("div");
+        mit.className = "export-danger-mitigation";
+        mit.setAttribute("dir", contentDir);
+        mit.setAttribute("lang", lang);
+        mit.textContent = mitigation;
+        item.appendChild(mit);
+      }
+
+      list.appendChild(item);
+    }
+    dangerSection.appendChild(list);
+  }
+
+  // Claims
+  const claims = Array.isArray(report?.claims) ? report.claims.slice() : [];
+  claims.sort((a, b) => Number(b?.weight ?? 0) - Number(a?.weight ?? 0));
+  const claimsSection = addSection("Claims");
+  if (!claims.length) {
+    const empty = document.createElement("div");
+    empty.className = "export-muted";
+    empty.textContent = "No claims extracted.";
+    claimsSection.appendChild(empty);
+  } else {
+    const wrap = document.createElement("div");
+    wrap.className = "export-claims";
+    claims.forEach((c, idx) => {
+      const card = document.createElement("div");
+      card.className = "export-claim";
+      card.dataset.tone = exportToneForClaimVerdict(c?.verdict);
+
+      const head = document.createElement("div");
+      head.className = "export-claim-head";
+
+      const title = document.createElement("div");
+      title.className = "export-claim-title";
+      title.setAttribute("dir", contentDir);
+      title.setAttribute("lang", lang);
+      title.textContent = `${idx + 1}. ${String(c?.claim || "").trim()}`;
+
+      const badges = document.createElement("div");
+      badges.className = "export-claim-badges";
+
+      const verdict = document.createElement("span");
+      verdict.className = "export-pill";
+      verdict.dataset.tone = exportToneForClaimVerdict(c?.verdict);
+      verdict.setAttribute("dir", "ltr");
+      verdict.textContent = verdictLabel(c?.verdict) || "Unverifiable";
+
+      const weight = Math.max(0, Math.min(100, Number(c?.weight ?? 0)));
+      const conf = Math.max(0, Math.min(100, Number(c?.confidence ?? 0)));
+
+      const weightP = document.createElement("span");
+      weightP.className = "export-pill export-pill_subtle";
+      weightP.setAttribute("dir", "ltr");
+      weightP.textContent = `W:${weight}`;
+
+      const confP = document.createElement("span");
+      confP.className = "export-pill export-pill_subtle";
+      confP.setAttribute("dir", "ltr");
+      confP.textContent = `C:${conf}`;
+
+      badges.appendChild(verdict);
+      badges.appendChild(weightP);
+      badges.appendChild(confP);
+
+      head.appendChild(title);
+      head.appendChild(badges);
+
+      const explanation = document.createElement("div");
+      explanation.className = "export-claim-explanation";
+      explanation.setAttribute("dir", contentDir);
+      explanation.setAttribute("lang", lang);
+      explanation.textContent = String(c?.explanation || "").trim();
+
+      card.appendChild(head);
+      card.appendChild(explanation);
+
+      const correction = String(c?.correction || "").trim();
+      if (correction) {
+        const corr = document.createElement("div");
+        corr.className = "export-callout";
+        const corrLabel = document.createElement("div");
+        corrLabel.className = "export-callout-label";
+        corrLabel.textContent = "Correction";
+        const corrBody = document.createElement("div");
+        corrBody.className = "export-callout-body";
+        corrBody.setAttribute("dir", contentDir);
+        corrBody.setAttribute("lang", lang);
+        corrBody.textContent = correction;
+        corr.appendChild(corrLabel);
+        corr.appendChild(corrBody);
+        card.appendChild(corr);
+      }
+
+      const sources = Array.isArray(c?.sources) ? c.sources : [];
+      if (sources.length) {
+        const srcTitle = document.createElement("div");
+        srcTitle.className = "export-subtitle";
+        srcTitle.textContent = "Sources";
+        const ul = document.createElement("ul");
+        ul.className = "export-sources";
+        ul.setAttribute("dir", "ltr");
+        for (const s of sources) {
+          const li = document.createElement("li");
+          const pub = s?.publisher ? `${s.publisher} — ` : "";
+          const t = String(s?.title || "").trim();
+          const url = String(s?.url || "").trim();
+          const text = `${pub}${t}${url ? ` (${url})` : ""}`;
+          li.textContent = text;
+          ul.appendChild(li);
+        }
+        card.appendChild(srcTitle);
+        card.appendChild(ul);
+      }
+
+      wrap.appendChild(card);
+    });
+    claimsSection.appendChild(wrap);
+  }
+
+  // Sources used
+  const sourcesUsed = Array.isArray(report?.sources_used) ? report.sources_used : [];
+  const sourcesSection = addSection("Sources used");
+  if (!sourcesUsed.length) {
+    const empty = document.createElement("div");
+    empty.className = "export-muted";
+    empty.textContent = "No sources listed.";
+    sourcesSection.appendChild(empty);
+  } else {
+    const ul = document.createElement("ul");
+    ul.className = "export-sources export-sources_block";
+    ul.setAttribute("dir", "ltr");
+    for (const s of sourcesUsed) {
+      const li = document.createElement("li");
+      const pub = s?.publisher ? `${s.publisher} — ` : "";
+      const t = String(s?.title || "").trim();
+      const url = String(s?.url || "").trim();
+      const accessed = String(s?.accessed_at || "").trim();
+      const suffix = accessed ? ` (accessed ${accessed})` : "";
+      li.textContent = `${pub}${t}${url ? ` (${url})` : ""}${suffix}`;
+      ul.appendChild(li);
+    }
+    sourcesSection.appendChild(ul);
+  }
+
+  return root;
+}
+
+async function waitForExportLayout() {
+  try {
+    const waitFonts = document.fonts?.ready;
+    if (waitFonts) {
+      await Promise.race([waitFonts, new Promise((r) => setTimeout(r, 1500))]);
+    }
+  } catch {
+    // ignore
+  }
+
+  await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => requestAnimationFrame(r));
+}
+
+function getExportJobOrThrow() {
+  if (!currentJob || !currentJob.report) {
+    throw new Error("No completed report to export yet.");
+  }
+  return currentJob;
+}
+
+async function exportReportPdf() {
+  ensureExportLibs();
+  const job = getExportJobOrThrow();
+
+  if (!els.exportMount) throw new Error("Export mount is missing in the page.");
+  els.exportMount.innerHTML = "";
+  const doc = buildExportDocument(job);
+  els.exportMount.appendChild(doc);
+
+  try {
+    await waitForExportLayout();
+
+    const rect = doc.getBoundingClientRect();
+    const pageWidthPx = Math.max(1, Math.round(rect.width));
+    const pageHeightPx = Math.max(1, Math.round(pageWidthPx * (297 / 210)));
+    const totalHeightPx = Math.max(pageHeightPx, Math.round(doc.scrollHeight));
+    const pages = Math.max(1, Math.ceil(totalHeightPx / pageHeightPx));
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+    const pageWidthPt = pdf.internal.pageSize.getWidth();
+    const pageHeightPt = pdf.internal.pageSize.getHeight();
+
+    for (let p = 0; p < pages; p++) {
+      showAlert(els.infoBox, `Rendering PDF page ${p + 1}/${pages}…`);
+      setHidden(els.errorBox, true);
+      if (p > 0) pdf.addPage();
+      const canvas = await window.html2canvas(doc, {
+        backgroundColor: "#0a0e17",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        x: 0,
+        y: p * pageHeightPx,
+        width: pageWidthPx,
+        height: pageHeightPx,
+        windowWidth: pageWidthPx,
+        windowHeight: pageHeightPx,
+        scrollX: -window.scrollX,
+        scrollY: -window.scrollY,
+      });
+
+      const imgData = canvas.toDataURL("image/png", 1.0);
+      pdf.addImage(imgData, "PNG", 0, 0, pageWidthPt, pageHeightPt, undefined, "FAST");
+    }
+
+    pdf.save(`${exportFileBase(job)}.pdf`);
+  } finally {
+    els.exportMount.innerHTML = "";
+  }
+}
+
+async function exportReportPng() {
+  ensureExportLibs();
+  const job = getExportJobOrThrow();
+
+  if (!els.exportMount) throw new Error("Export mount is missing in the page.");
+  els.exportMount.innerHTML = "";
+  const doc = buildExportDocument(job);
+  els.exportMount.appendChild(doc);
+
+  try {
+    await waitForExportLayout();
+
+    const rect = doc.getBoundingClientRect();
+    const pageWidthPx = Math.max(1, Math.round(rect.width));
+    const pageHeightPx = Math.max(1, Math.round(pageWidthPx * (297 / 210)));
+    const totalHeightPx = Math.max(pageHeightPx, Math.round(doc.scrollHeight));
+    const pages = Math.max(1, Math.ceil(totalHeightPx / pageHeightPx));
+
+    if (pages > 6) {
+      const ok = window.confirm(
+        `This report is ${pages} pages long. Exporting a single PNG may be very large and could slow down your browser.\n\nPress OK to continue, or Cancel to export as PDF instead.`,
+      );
+      if (!ok) return;
+    }
+
+    const canvas = await window.html2canvas(doc, {
+      backgroundColor: "#0a0e17",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      scrollX: -window.scrollX,
+      scrollY: -window.scrollY,
+      windowWidth: pageWidthPx,
+      windowHeight: totalHeightPx,
+    });
+
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("Failed to render PNG."))),
+        "image/png",
+        1.0,
+      );
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${exportFileBase(job)}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } finally {
+    els.exportMount.innerHTML = "";
+  }
+}
+
+// ============================================
 // Language Dropdown
 // ============================================
 
@@ -996,10 +1610,14 @@ els.langSearch?.addEventListener("input", (e) => renderLangList(e.target.value))
 
 document.addEventListener("click", (e) => {
   if (els.langDropdown && !els.langDropdown.contains(e.target)) closeLangMenu();
+  if (els.exportDropdown && !els.exportDropdown.contains(e.target)) closeExportMenu();
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeLangMenu();
+  if (e.key === "Escape") {
+    closeLangMenu();
+    closeExportMenu();
+  }
 });
 
 function setSelectedLanguageByCode(code) {
@@ -1249,6 +1867,7 @@ async function runAnalysis({ force }) {
 
 function startNewAnalysis({ navigate = true } = {}) {
   cancelPolling();
+  currentJob = null;
   currentJobId = null;
   if (navigate) navigateHome();
 
@@ -1322,6 +1941,42 @@ els.shareBtn?.addEventListener("click", async () => {
   } catch (e) {
     // Fallback for browsers without clipboard access (or non-HTTPS contexts)
     window.prompt("Copy this share link:", url);
+  }
+});
+
+els.exportBtn?.addEventListener("click", () => {
+  const isOpen = !els.exportMenu?.classList.contains("hidden");
+  if (isOpen) closeExportMenu();
+  else openExportMenu();
+});
+
+els.exportPdf?.addEventListener("click", async () => {
+  closeExportMenu();
+  setExportBusy(true, "Exporting PDF…");
+  showAlert(els.infoBox, "Preparing PDF export…");
+  setHidden(els.errorBox, true);
+  try {
+    await exportReportPdf();
+    showAlert(els.infoBox, "PDF exported.");
+  } catch (e) {
+    reportExportError(e);
+  } finally {
+    setExportBusy(false);
+  }
+});
+
+els.exportPng?.addEventListener("click", async () => {
+  closeExportMenu();
+  setExportBusy(true, "Exporting PNG…");
+  showAlert(els.infoBox, "Preparing PNG export…");
+  setHidden(els.errorBox, true);
+  try {
+    await exportReportPng();
+    showAlert(els.infoBox, "PNG exported.");
+  } catch (e) {
+    reportExportError(e);
+  } finally {
+    setExportBusy(false);
   }
 });
 
