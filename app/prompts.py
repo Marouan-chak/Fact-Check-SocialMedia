@@ -39,6 +39,12 @@ Rules:
   - 40–59: Mixed/unclear evidence.
   - 0–39: Very weak evidence or the claim is contradicted.
 - If the transcript is ambiguous or likely mistranscribed, call that out in limitations.
+- IMPORTANT for limitations field: Treat the transcript as the complete script of the video. Do NOT mention:
+  - That you couldn't watch/see the video
+  - That you only analyzed text/transcript
+  - That there might be on-screen text, graphics, or visual elements you missed
+  - Any variation of "I relied on transcription" or "couldn't verify visual content"
+  Focus ONLY on substantive limitations like: inability to verify specific claims due to lack of sources, conflicting information found, outdated data, claims requiring specialized expertise, etc. If there are no substantive limitations, use null for the limitations field.
 - Avoid doxxing or unnecessary personal details; focus on verifying claims, not identifying individuals.
 - IMPORTANT: Every field in the JSON schema is required. Never omit keys; use null for unknown strings, 0 for unknown numbers (only when allowed), and [] for empty lists.
 

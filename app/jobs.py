@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,6 +118,27 @@ class JobStore:
 
     def _audio_dir(self, job_id: str) -> Path:
         return self._job_dir(job_id) / "media"
+
+    def _cleanup_audio_files(self, job_id: str) -> None:
+        """Remove audio files from the media folder to save space after job completion."""
+        media_dir = self._audio_dir(job_id)
+        if not media_dir.exists():
+            return
+
+        # Audio file extensions to remove
+        audio_extensions = {".mp3", ".m4a", ".wav", ".opus", ".webm", ".ogg", ".aac", ".flac"}
+
+        # Remove audio files in media folder
+        for file_path in media_dir.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in audio_extensions:
+                with contextlib.suppress(Exception):
+                    file_path.unlink()
+
+        # Remove segments folder if it exists (contains split audio files)
+        segments_dir = media_dir / "segments"
+        if segments_dir.exists() and segments_dir.is_dir():
+            with contextlib.suppress(Exception):
+                shutil.rmtree(segments_dir)
 
     def _load_job_from_disk(self, job_id: str) -> Optional[Job]:
         data = read_json(self._job_path(job_id))
@@ -465,6 +487,9 @@ class JobStore:
 
             # Update URL index after successful completion
             self._update_url_index(job.url, job.id)
+
+            # Clean up audio files to save space (transcript is already saved)
+            self._cleanup_audio_files(job.id)
 
             await self.update(job.id, status="completed", progress=100, report=report)
         finally:

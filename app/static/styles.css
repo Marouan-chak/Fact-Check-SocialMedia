@@ -29,6 +29,8 @@
   --warning-dim: rgba(245, 158, 11, 0.15);
   --danger: #ef4444;
   --danger-dim: rgba(239, 68, 68, 0.15);
+  --info: #3b82f6;
+  --info-dim: rgba(59, 130, 246, 0.15);
   
   /* Typography */
   --font-sans: 'Outfit', system-ui, -apple-system, sans-serif;
@@ -1585,6 +1587,103 @@ body {
   margin: 4px 0;
 }
 
+/* === Context & Limitations === */
+.context-section {
+  margin-bottom: 24px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .context-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.context-block {
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+}
+
+/* Missing Context - Yellow/Warning */
+.context-block_missing {
+  border-left-color: var(--warning);
+}
+
+.context-block_missing .context-icon {
+  color: var(--warning);
+  background: var(--warning-dim);
+}
+
+/* Limitations - Blue */
+.context-block_limits {
+  border-left-color: var(--info);
+}
+
+.context-block_limits .context-icon {
+  color: var(--info);
+  background: var(--info-dim);
+}
+
+.context-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.context-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.context-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.context-list {
+  margin: 0;
+  padding: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.context-list li {
+  margin: 4px 0;
+}
+
+.context-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
 /* === Danger Section === */
 .danger-section {
   padding: 20px;
@@ -2221,6 +2320,8 @@ code {
   --export-warning-dim: rgba(245, 158, 11, 0.15);
   --export-danger: #ef4444;
   --export-danger-dim: rgba(239, 68, 68, 0.15);
+  --export-info: #3b82f6;
+  --export-info-dim: rgba(59, 130, 246, 0.15);
 
   width: 794px;
   box-sizing: border-box;
@@ -2313,6 +2414,28 @@ code {
   border: 1px solid var(--export-border-accent);
   text-align: center;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(45, 212, 191, 0.1);
+  --export-score-color: var(--export-accent);
+  --export-score-shadow: rgba(45, 212, 191, 0.5);
+}
+
+.export-score-card[data-tone="good"] {
+  --export-score-color: var(--export-success);
+  --export-score-shadow: rgba(34, 197, 94, 0.5);
+}
+
+.export-score-card[data-tone="warn"] {
+  --export-score-color: var(--export-warning);
+  --export-score-shadow: rgba(245, 158, 11, 0.5);
+}
+
+.export-score-card[data-tone="bad"] {
+  --export-score-color: var(--export-danger);
+  --export-score-shadow: rgba(239, 68, 68, 0.5);
+}
+
+.export-score-card[data-tone="muted"] {
+  --export-score-color: var(--export-muted);
+  --export-score-shadow: rgba(148, 163, 184, 0.4);
 }
 
 .export-score-ring {
@@ -2336,10 +2459,10 @@ code {
 
 .export-score-fg {
   fill: none;
-  stroke: var(--export-accent);
+  stroke: var(--export-score-color);
   stroke-width: 10;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.5));
+  filter: drop-shadow(0 0 8px var(--export-score-shadow));
 }
 
 .export-score-text {
@@ -2445,6 +2568,33 @@ code {
   padding: 16px 18px;
 }
 
+.export-card_compact {
+  padding: 12px 14px;
+}
+
+.export-card_compact .export-card-title {
+  margin-bottom: 6px;
+}
+
+.export-compact-label {
+  margin: 8px 0 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--export-soft);
+}
+
+.export-list_compact {
+  gap: 6px;
+  font-size: 12px;
+}
+
+.export-paragraph_compact {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .export-card[data-tone="good"] { 
   border-left: 4px solid var(--export-success); 
   background: linear-gradient(135deg, var(--export-success-dim) 0%, var(--export-bg-elevated) 100%);
@@ -2456,6 +2606,10 @@ code {
 .export-card[data-tone="warn"] { 
   border-left: 4px solid var(--export-warning); 
   background: linear-gradient(135deg, var(--export-warning-dim) 0%, var(--export-bg-elevated) 100%);
+}
+.export-card[data-tone="info"] { 
+  border-left: 4px solid var(--export-info); 
+  background: linear-gradient(135deg, var(--export-info-dim) 0%, var(--export-bg-elevated) 100%);
 }
 .export-card[data-tone="muted"] { 
   border-left: 4px solid rgba(100, 116, 139, 0.6); 

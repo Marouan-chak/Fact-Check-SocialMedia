@@ -47,6 +47,11 @@ const els = {
   reportSummary: document.getElementById("reportSummary"),
   whatsRight: document.getElementById("whatsRight"),
   whatsWrong: document.getElementById("whatsWrong"),
+  contextSection: document.getElementById("contextSection"),
+  contextMissingBlock: document.getElementById("contextMissingBlock"),
+  contextLimitationsBlock: document.getElementById("contextLimitationsBlock"),
+  missingContextList: document.getElementById("missingContextList"),
+  limitationsText: document.getElementById("limitationsText"),
   dangerList: document.getElementById("dangerList"),
   dangerSection: document.getElementById("dangerSection"),
   sourcesList: document.getElementById("sourcesList"),
@@ -151,7 +156,15 @@ function applyOutputDirection() {
   const lang = String(currentReportLanguage || selectedLanguage?.code || "en").toLowerCase();
   const dir = isRtlLanguage(lang) ? "rtl" : "ltr";
 
-  const outputEls = [els.reportSummary, els.whatsRight, els.whatsWrong, els.dangerList, els.claimsList];
+  const outputEls = [
+    els.reportSummary,
+    els.whatsRight,
+    els.whatsWrong,
+    els.missingContextList,
+    els.limitationsText,
+    els.dangerList,
+    els.claimsList,
+  ];
   for (const el of outputEls) {
     if (!el) continue;
     el.setAttribute("dir", dir);
@@ -317,6 +330,22 @@ function setList(ul, items) {
     li.textContent = item;
     ul.appendChild(li);
   }
+}
+
+function setContextInfo(missingContext, limitations) {
+  const missing = Array.isArray(missingContext)
+    ? missingContext.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+  const limits = String(limitations ?? "").trim();
+  const hasMissing = missing.length > 0;
+  const hasLimits = !!limits;
+
+  setHidden(els.contextSection, !(hasMissing || hasLimits));
+  setHidden(els.contextMissingBlock, !hasMissing);
+  setHidden(els.contextLimitationsBlock, !hasLimits);
+
+  setList(els.missingContextList, missing);
+  setText(els.limitationsText, limits);
 }
 
 function setDangerList(ul, items) {
@@ -909,6 +938,7 @@ function renderResult(job) {
   
   setList(els.whatsRight, job.report?.whats_right || []);
   setList(els.whatsWrong, job.report?.whats_wrong || []);
+  setContextInfo(job.report?.missing_context, job.report?.limitations);
   setDangerList(els.dangerList, job.report?.danger || []);
   setSources(els.sourcesList, job.report?.sources_used || []);
   renderClaims(job.report?.claims || []);
@@ -1020,6 +1050,14 @@ function exportToneForOverallVerdict(v) {
   return "muted";
 }
 
+function exportToneForScore(score) {
+  const s = Number(score);
+  if (!Number.isFinite(s)) return "muted";
+  if (s < 50) return "bad";
+  if (s < 80) return "warn";
+  return "good";
+}
+
 function exportToneForClaimVerdict(v) {
   const s = String(v || "").toLowerCase();
   if (s === "supported") return "good";
@@ -1096,6 +1134,8 @@ function buildExportDocument(job) {
   const score = Math.max(0, Math.min(100, Number(report?.overall_score ?? 0)));
   const verdictLabelText = humanizeEnum(report?.overall_verdict) || "";
   const tone = exportToneForOverallVerdict(report?.overall_verdict);
+  const scoreTone = exportToneForScore(score);
+  scoreCard.dataset.tone = scoreTone;
 
   const ring = document.createElement("div");
   ring.className = "export-score-ring";
@@ -1214,31 +1254,55 @@ function buildExportDocument(job) {
   glance.appendChild(makeCard("What's wrong", report?.whats_wrong || [], { tone: "bad" }));
   root.appendChild(glance);
 
-  // Missing context / Limitations
+  // Missing context / Limitations - separate cards with distinct colors
   const missing = Array.isArray(report?.missing_context) ? report.missing_context : [];
   const limitations = String(report?.limitations || "").trim();
   if (missing.length || limitations) {
     const ctxWrap = document.createElement("div");
     ctxWrap.className = "export-card-grid export-card-grid_2";
+
     if (missing.length) {
-      ctxWrap.appendChild(makeCard("Missing context", missing, { tone: "warn" }));
+      const missingCard = document.createElement("div");
+      missingCard.className = "export-card";
+      missingCard.dataset.tone = "warn";
+
+      const missingTitle = document.createElement("div");
+      missingTitle.className = "export-card-title";
+      missingTitle.textContent = "Missing Context";
+      missingCard.appendChild(missingTitle);
+
+      const list = document.createElement("ul");
+      list.className = "export-list";
+      list.setAttribute("dir", contentDir);
+      list.setAttribute("lang", lang);
+      for (const it of missing) {
+        const li = document.createElement("li");
+        li.textContent = String(it ?? "");
+        list.appendChild(li);
+      }
+      missingCard.appendChild(list);
+      ctxWrap.appendChild(missingCard);
     }
+
     if (limitations) {
-      const card = document.createElement("div");
-      card.className = "export-card";
-      card.dataset.tone = "muted";
-      const title = document.createElement("div");
-      title.className = "export-card-title";
-      title.textContent = "Limitations";
+      const limitsCard = document.createElement("div");
+      limitsCard.className = "export-card";
+      limitsCard.dataset.tone = "info";
+
+      const limitsTitle = document.createElement("div");
+      limitsTitle.className = "export-card-title";
+      limitsTitle.textContent = "Limitations";
+      limitsCard.appendChild(limitsTitle);
+
       const p = document.createElement("p");
       p.className = "export-paragraph";
       p.setAttribute("dir", contentDir);
       p.setAttribute("lang", lang);
       p.textContent = limitations;
-      card.appendChild(title);
-      card.appendChild(p);
-      ctxWrap.appendChild(card);
+      limitsCard.appendChild(p);
+      ctxWrap.appendChild(limitsCard);
     }
+
     root.appendChild(ctxWrap);
   }
 
