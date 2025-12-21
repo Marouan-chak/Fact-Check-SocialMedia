@@ -96,3 +96,25 @@ async def get_job_thumbnail(job_id: str):
 @app.get("/api/history", response_model=list[HistoryItem])
 async def history(limit: int = 50):
     return await job_store.list_history(limit=limit)
+
+
+@app.delete("/api/history/{job_id}")
+async def delete_history_item(job_id: str):
+    try:
+        ok = await job_store.delete_job(job_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"ok": True}
+
+
+@app.delete("/api/history")
+async def delete_history(all: bool = False):
+    if not all:
+        raise HTTPException(status_code=400, detail="Set all=true to delete all history.")
+    try:
+        count = await job_store.delete_all_history()
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"ok": True, "deleted": count}

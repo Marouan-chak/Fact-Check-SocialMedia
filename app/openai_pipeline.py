@@ -329,6 +329,34 @@ def _normalize_transcribe_model(model: str) -> str:
     return aliases.get(key, raw)
 
 
+def _normalize_thinking_level(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    level = str(raw).strip().lower()
+    return level or None
+
+
+def _openai_reasoning_effort() -> str:
+    level = _normalize_thinking_level(getattr(settings, "factcheck_thinking_level", None))
+    if level in {"low", "medium", "high"}:
+        return level
+    return "high"
+
+
+def _is_gemini_3_pro(model: str) -> bool:
+    m = (model or "").strip().lower()
+    return "gemini-3" in m and "pro" in m
+
+
+def _gemini_thinking_level(model: str) -> Optional[str]:
+    if not _is_gemini_3_pro(model):
+        return None
+    level = _normalize_thinking_level(getattr(settings, "factcheck_thinking_level", None))
+    if level in {"low", "high"}:
+        return level
+    return None
+
+
 def _transcribe_file(path: Path) -> str:
     model = _normalize_transcribe_model(settings.transcribe_model or "")
     if not model:
@@ -450,6 +478,9 @@ def _gemini_generate_json(
             cfg.response_mime_type = "application/json"
         if system_instruction:
             cfg.system_instruction = system_instruction
+        thinking_level = _gemini_thinking_level(model)
+        if thinking_level:
+            cfg.thinking_config = types.ThinkingConfig(thinking_level=thinking_level)
         # For retries, we drop tools and just ask the model to output valid JSON.
         # This avoids tool-calling + JSON-mode incompatibilities and keeps the retry cheap.
         if tools and attempt == 1:
@@ -508,7 +539,7 @@ def _fact_check_transcript_openai(
                 "search_context_size": "medium",
             }
         ],
-        reasoning={"effort": "high", "summary": "auto"},
+        reasoning={"effort": _openai_reasoning_effort(), "summary": "auto"},
         text={
             "verbosity": "medium",
             "format": {
@@ -601,7 +632,7 @@ def _fact_check_transcript_openai_stream(
                 "search_context_size": "medium",
             }
         ],
-        reasoning={"effort": "high", "summary": "auto"},
+        reasoning={"effort": _openai_reasoning_effort(), "summary": "auto"},
         text={
             "verbosity": "medium",
             "format": {
@@ -688,11 +719,17 @@ def _fact_check_transcript_gemini_stream(
 
     client = genai.Client(api_key=api_key)
 
+    thinking_level = _gemini_thinking_level(model)
+    thinking_config = (
+        types.ThinkingConfig(include_thoughts=True, thinking_level=thinking_level)
+        if thinking_level
+        else types.ThinkingConfig(include_thoughts=True)
+    )
     config = types.GenerateContentConfig(
         system_instruction=FACTCHECK_SYSTEM_PROMPT,
         tools=[{"google_search": {}}, {"url_context": {}}],
         temperature=1.0,
-        thinking_config=types.ThinkingConfig(include_thoughts=True),
+        thinking_config=thinking_config,
     )
 
     text_chunks: list[str] = []

@@ -63,6 +63,7 @@ class JobStore:
         self._index: Dict[str, str] = {}  # cache_key (url+lang) -> job_id
         self._url_index: Dict[str, list[str]] = {}  # normalized_url -> [job_ids]
         self._running: set[str] = set()
+        self._tasks: Dict[str, asyncio.Task] = {}
 
         data = read_json(self.index_path)
         if isinstance(data, dict):
@@ -351,9 +352,87 @@ class JobStore:
         items.sort(key=lambda x: x.updated_at, reverse=True)
         return items[:limit]
 
+    async def delete_job(self, job_id: str) -> bool:
+        task = None
+        async with self._lock:
+            task = self._tasks.get(job_id)
+            if task and not task.done():
+                task.cancel()
+            self._running.discard(job_id)
+
+        if task and not task.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+        async with self._lock:
+            job_dir = self._job_dir(job_id)
+            if not job_dir.exists():
+                return False
+
+            # Remove in-memory cache
+            self._jobs.pop(job_id, None)
+
+            # Remove from url+lang index
+            if self._index:
+                self._index = {k: v for k, v in self._index.items() if v != job_id}
+                write_json(self.index_path, self._index)
+
+            # Remove from URL-only index
+            if self._url_index:
+                changed = False
+                for url_key, ids in list(self._url_index.items()):
+                    if job_id in ids:
+                        ids = [x for x in ids if x != job_id]
+                        if ids:
+                            self._url_index[url_key] = ids
+                        else:
+                            self._url_index.pop(url_key, None)
+                        changed = True
+                if changed:
+                    write_json(self.url_only_index_path, self._url_index)
+
+            with contextlib.suppress(Exception):
+                shutil.rmtree(job_dir)
+
+            return True
+
+    async def delete_all_history(self) -> int:
+        tasks = []
+        async with self._lock:
+            tasks = list(self._tasks.values())
+            for task in tasks:
+                if task and not task.done():
+                    task.cancel()
+            self._running.clear()
+
+        for task in tasks:
+            if task and not task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+
+        async with self._lock:
+            count = 0
+            if self.jobs_dir.exists():
+                for entry in self.jobs_dir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    with contextlib.suppress(Exception):
+                        shutil.rmtree(entry)
+                        count += 1
+
+            self._jobs.clear()
+            self._index = {}
+            self._url_index = {}
+            self._tasks = {}
+            write_json(self.index_path, self._index)
+            write_json(self.url_only_index_path, self._url_index)
+            return count
+
     async def update(self, job_id: str, **fields) -> None:
         async with self._lock:
-            job = self._jobs[job_id]
+            job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
+            if not job:
+                return
             updated = job.model_copy(update={**fields, "updated_at": datetime.now(tz=timezone.utc)})
             self._jobs[job_id] = updated
             write_model(self._job_path(job_id), updated)
@@ -434,6 +513,9 @@ class JobStore:
             if job_id in self._running:
                 return
             self._running.add(job_id)
+            task = asyncio.current_task()
+            if task:
+                self._tasks[job_id] = task
 
         job = await self.get(job_id)
         if not job:
@@ -453,11 +535,15 @@ class JobStore:
             if "Sign in to confirm" in error_msg or "cookies" in error_msg.lower():
                 error_msg = "YouTube requires authentication. Please configure cookies in YTDLP_COOKIES_FILE environment variable. See: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
             await self.update(job.id, status="failed", progress=100, error=error_msg)
+        except asyncio.CancelledError:
+            # Allow deletion to cancel running jobs without additional writes.
+            raise
         except Exception as e:
             await self.update(job.id, status="failed", progress=100, error=str(e))
         finally:
             async with self._lock:
                 self._running.discard(job_id)
+                self._tasks.pop(job_id, None)
 
     async def _run_translation_pipeline(self, job: Job) -> None:
         """Run translation-only pipeline: translate existing report to new language."""

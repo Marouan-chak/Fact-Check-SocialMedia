@@ -19,6 +19,7 @@ const els = {
   historyToggle: document.getElementById("historyToggle"),
   historyCard: document.getElementById("historyCard"),
   historyRefresh: document.getElementById("historyRefresh"),
+  historyClear: document.getElementById("historyClear"),
   historyList: document.getElementById("historyList"),
   historySearch: document.getElementById("historySearch"),
 
@@ -1860,6 +1861,35 @@ function renderHistory(items) {
     timeBadge.textContent = formatTimeAgo(item.updated_at);
     badges.appendChild(timeBadge);
 
+    const actions = document.createElement("div");
+    actions.className = "history-actions-inline";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "history-delete-btn";
+    deleteBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6"/>
+        <path d="M14 11v6"/>
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+    `;
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm("Delete this history item? This cannot be undone.")) return;
+      try {
+        deleteBtn.disabled = true;
+        await deleteHistoryItem(item.id);
+        await loadHistory();
+      } catch (err) {
+        showAlert(els.errorBox, err?.message || String(err));
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "history-open-btn";
@@ -1878,8 +1908,11 @@ function renderHistory(items) {
       }
     });
 
+    actions.appendChild(deleteBtn);
+    actions.appendChild(openBtn);
+
     footer.appendChild(badges);
-    footer.appendChild(openBtn);
+    footer.appendChild(actions);
 
     content.appendChild(title);
     content.appendChild(urlEl);
@@ -1928,6 +1961,23 @@ async function loadHistory() {
         </div>
       `;
     }
+  }
+}
+
+async function deleteHistoryItem(jobId) {
+  const id = encodeURIComponent(String(jobId || ""));
+  const res = await fetch(`/api/history/${id}`, { method: "DELETE", credentials: "same-origin" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || `Failed to delete history (${res.status})`);
+  }
+}
+
+async function deleteAllHistory() {
+  const res = await fetch("/api/history?all=true", { method: "DELETE", credentials: "same-origin" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || `Failed to delete history (${res.status})`);
   }
 }
 
@@ -2175,6 +2225,19 @@ els.historyRefresh?.addEventListener("click", async () => {
   if (icon) icon.style.animation = 'spin 0.5s linear';
   await loadHistory();
   if (icon) setTimeout(() => icon.style.animation = '', 500);
+});
+
+els.historyClear?.addEventListener("click", async () => {
+  if (!confirm("Delete all history items? This cannot be undone.")) return;
+  try {
+    if (els.historyClear) els.historyClear.disabled = true;
+    await deleteAllHistory();
+    await loadHistory();
+  } catch (err) {
+    showAlert(els.errorBox, err?.message || String(err));
+  } finally {
+    if (els.historyClear) els.historyClear.disabled = false;
+  }
 });
 
 // History search

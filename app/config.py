@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     transcribe_chunk_seconds: int = 900  # 15 minutes
     transcribe_max_workers: int = 3
     factcheck_model: str = "gpt-5.2-2025-12-11"
+    factcheck_thinking_level: Optional[str] = None
 
     @field_validator("ytdlp_cookies_file", mode="before")
     @classmethod

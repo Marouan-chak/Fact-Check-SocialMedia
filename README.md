@@ -37,6 +37,9 @@ Open `http://127.0.0.1:8000`.
 - Fact-check provider switch via `FACTCHECK_MODEL`:
   - OpenAI: `gpt-5.2-2025-12-11` (uses `OPENAI_API_KEY`)
   - Gemini: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-pro-preview` (uses `GEMINI_API_KEY`)
+- Optional fact-check thinking level via `FACTCHECK_THINKING_LEVEL`:
+  - OpenAI GPT-5.2: `low | medium | high`
+  - Gemini 3 Pro: `low | high`
 
 ## Docker
 ```bash
