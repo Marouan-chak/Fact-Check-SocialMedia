@@ -72,6 +72,12 @@ async def analyze(req: AnalyzeRequest):
     if job.translate_from_job_id and not settings.gemini_api_key:
         raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not set (required for translation).")
 
+    if not req.force:
+        if cached:
+            asyncio.create_task(job_store.ensure_metadata(job.id))
+        elif job.translate_from_job_id:
+            asyncio.create_task(job_store.ensure_metadata(job.translate_from_job_id))
+
     if job.status not in {"completed", "failed"}:
         asyncio.create_task(job_store.run_pipeline(job.id))
     return {"job_id": job.id, "cached": cached, "is_translation": bool(job.translate_from_job_id)}

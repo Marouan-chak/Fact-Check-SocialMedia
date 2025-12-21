@@ -8,6 +8,8 @@ const els = {
   forceRun: document.getElementById("forceRun"),
   newAnalysis: document.getElementById("newAnalysis"),
   logoLink: document.getElementById("logoLink"),
+  themeToggle: document.getElementById("themeToggle"),
+  themeLabel: document.getElementById("themeLabel"),
 
   langDropdown: document.getElementById("langDropdown"),
   langButton: document.getElementById("langButton"),
@@ -127,6 +129,8 @@ let progressBoxCollapsed = false;
 let userScrolledUp = false;
 
 const RTL_LANGS = new Set(["ar", "fa", "he", "ur"]);
+const THEME_STORAGE_KEY = "verifyai-theme";
+const themeQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
 
 // ============================================
 // Utility Functions
@@ -175,6 +179,55 @@ function applyOutputDirection() {
 
   if (els.sourcesList) els.sourcesList.setAttribute("dir", "auto");
   if (els.transcript) els.transcript.setAttribute("dir", "auto");
+}
+
+function getStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Ignore storage errors (private mode, etc.)
+  }
+}
+
+function updateThemeToggle(theme) {
+  if (!els.themeToggle) return;
+  const isDark = theme === "dark";
+  els.themeToggle.setAttribute("aria-pressed", isDark ? "true" : "false");
+  els.themeToggle.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
+  if (els.themeLabel) els.themeLabel.textContent = isDark ? "Light" : "Dark";
+}
+
+function applyTheme(theme, { persist = false } = {}) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  updateThemeToggle(next);
+  if (persist) setStoredTheme(next);
+}
+
+function initTheme() {
+  const stored = getStoredTheme();
+  const hasStored = stored === "light" || stored === "dark";
+  const systemPrefersDark = Boolean(themeQuery?.matches);
+  const initial = hasStored ? stored : (systemPrefersDark ? "dark" : "light");
+
+  applyTheme(initial);
+
+  if (!hasStored && themeQuery) {
+    const handler = (e) => {
+      if (getStoredTheme()) return;
+      applyTheme(e.matches ? "dark" : "light");
+    };
+    if (themeQuery.addEventListener) themeQuery.addEventListener("change", handler);
+    else if (themeQuery.addListener) themeQuery.addListener(handler);
+  }
 }
 
 // ============================================
@@ -2143,6 +2196,12 @@ els.logoLink?.addEventListener("click", (e) => {
   startNewAnalysis();
 });
 
+els.themeToggle?.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const next = current === "dark" ? "light" : "dark";
+  applyTheme(next, { persist: true });
+});
+
 els.run?.addEventListener("click", async () => {
   await runAnalysis({ force: els.forceRun?.checked });
 });
@@ -2265,6 +2324,9 @@ els.thoughtsList?.addEventListener("scroll", () => {
 // ============================================
 // Initialize
 // ============================================
+
+// Initialize theme (persisted user choice or system preference)
+initTheme();
 
 // Initialize language dropdown
 renderLangList("");

@@ -160,7 +160,14 @@ class JobStore:
             with contextlib.suppress(Exception):
                 shutil.rmtree(segments_dir)
 
-    async def _cache_thumbnail(self, job_id: str, *, source_url: str, thumbnail_url: Optional[str]) -> None:
+    async def _cache_thumbnail(
+        self,
+        job_id: str,
+        *,
+        source_url: str,
+        thumbnail_url: Optional[str],
+        touch: bool = True,
+    ) -> None:
         if not source_url:
             return
         existing = self._thumbnail_path(job_id)
@@ -168,7 +175,7 @@ class JobStore:
             job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
             if job and job.video_thumbnail == self._thumbnail_endpoint(job_id):
                 return
-            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id))
+            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id), touch=touch)
             return
 
         media_dir = self._audio_dir(job_id)
@@ -185,7 +192,7 @@ class JobStore:
                 cookies_file=settings.ytdlp_cookies_file,
             )
         if path:
-            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id))
+            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id), touch=touch)
 
     def _load_job_from_disk(self, job_id: str) -> Optional[Job]:
         data = read_json(self._job_path(job_id))
@@ -251,12 +258,12 @@ class JobStore:
                 cached_id = self._index.get(cache_key)
                 if cached_id:
                     cached_job = self._jobs.get(cached_id) or self._load_job_from_disk(cached_id)
-                    if cached_job and cached_job.status != "failed":
+                    if cached_job:
                         # If this is a translation job, ensure it's based on the latest completed run for this URL.
                         # Otherwise language switching can "stick" to an old translation even after a re-run.
                         if cached_job.translate_from_job_id and has_gemini_key:
                             latest = self._find_completed_job_for_url(url)
-                            if latest and latest.id != cached_job.translate_from_job_id:
+                            if cached_job.status != "failed" and latest and latest.id != cached_job.translate_from_job_id:
                                 # Stale translation: fall through and create a new translation job from the latest run.
                                 pass
                             else:
@@ -428,14 +435,190 @@ class JobStore:
             write_json(self.url_only_index_path, self._url_index)
             return count
 
-    async def update(self, job_id: str, **fields) -> None:
+    async def update(self, job_id: str, *, touch: bool = True, **fields) -> None:
         async with self._lock:
             job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
             if not job:
                 return
-            updated = job.model_copy(update={**fields, "updated_at": datetime.now(tz=timezone.utc)})
+            if "updated_at" not in fields:
+                fields["updated_at"] = datetime.now(tz=timezone.utc) if touch else job.updated_at
+            updated = job.model_copy(update={**fields})
             self._jobs[job_id] = updated
             write_model(self._job_path(job_id), updated)
+
+    async def ensure_metadata(self, job_id: str) -> None:
+        job = await self.get(job_id)
+        if not job or not (job.url or "").strip():
+            return
+        if job.status not in {"completed", "failed"}:
+            return
+
+        def has_text(value: Optional[str]) -> bool:
+            return bool((value or "").strip())
+
+        def is_local_thumbnail_for(check_job: Job, value: Optional[str]) -> bool:
+            return bool(value) and str(value) == self._thumbnail_endpoint(check_job.id)
+
+        def needs_thumbnail(check_job: Job) -> bool:
+            if not has_text(check_job.video_thumbnail):
+                return True
+            if is_local_thumbnail_for(check_job, check_job.video_thumbnail) and not self._thumbnail_path(check_job.id):
+                return True
+            return False
+
+        def job_ids_for_url(url: str) -> list[str]:
+            normalized = _normalize_url(url)
+            job_ids = list(self._url_index.get(normalized, []))
+            if not job_ids:
+                prefix = f"{normalized}||"
+                for k, v in self._index.items():
+                    if str(k).startswith(prefix):
+                        job_ids.append(str(v))
+            # De-dup while preserving order
+            seen: set[str] = set()
+            ordered: list[str] = []
+            for jid in job_ids:
+                if jid in seen:
+                    continue
+                seen.add(jid)
+                ordered.append(jid)
+            return ordered
+
+        missing_title = not has_text(job.video_title)
+        missing_thumb = needs_thumbnail(job)
+
+        url_job_ids = job_ids_for_url(job.url)
+
+        # Pull metadata from other jobs for this URL (prefers remote thumbnail URLs).
+        fallback_title = None
+        fallback_thumb_url = None
+        for jid in url_job_ids:
+            candidate = self._jobs.get(jid) or self._load_job_from_disk(jid)
+            if not candidate:
+                continue
+            if not fallback_title and has_text(candidate.video_title):
+                fallback_title = candidate.video_title
+            if (
+                not fallback_thumb_url
+                and has_text(candidate.video_thumbnail)
+                and not is_local_thumbnail_for(candidate, candidate.video_thumbnail)
+            ):
+                fallback_thumb_url = candidate.video_thumbnail
+            if fallback_title and fallback_thumb_url:
+                break
+
+        # Prefer copying metadata from the source job for translation entries.
+        if job.translate_from_job_id:
+            source_job = await self.get(job.translate_from_job_id)
+            updates = {}
+            if source_job:
+                if missing_title and has_text(source_job.video_title):
+                    updates["video_title"] = source_job.video_title
+                if missing_thumb and has_text(source_job.video_thumbnail):
+                    updates["video_thumbnail"] = source_job.video_thumbnail
+            if updates:
+                await self.update(job.id, **updates, touch=False)
+                job = await self.get(job.id) or job
+                missing_title = not has_text(job.video_title)
+                missing_thumb = needs_thumbnail(job)
+                if not missing_title and not missing_thumb:
+                    return
+
+        updates = {}
+        if missing_title and fallback_title:
+            updates["video_title"] = fallback_title
+        if missing_thumb and fallback_thumb_url:
+            updates["video_thumbnail"] = fallback_thumb_url
+        if updates:
+            await self.update(job.id, **updates, touch=False)
+            job = await self.get(job.id) or job
+            missing_title = not has_text(job.video_title)
+            missing_thumb = needs_thumbnail(job)
+            if not missing_title and not missing_thumb:
+                # Still backfill other jobs for this URL below.
+                pass
+
+        metadata = None
+        if missing_title or missing_thumb:
+            try:
+                metadata = await asyncio.to_thread(
+                    get_video_metadata,
+                    url=job.url,
+                    cookies_file=settings.ytdlp_cookies_file,
+                )
+            except Exception:
+                metadata = None
+
+        updates = {}
+        if metadata:
+            if missing_title and metadata.title:
+                updates["video_title"] = metadata.title
+            if missing_thumb and metadata.thumbnail:
+                updates["video_thumbnail"] = metadata.thumbnail
+        if updates:
+            await self.update(job.id, **updates, touch=False)
+            job = await self.get(job.id) or job
+            missing_thumb = needs_thumbnail(job)
+
+        if missing_thumb:
+            await self._cache_thumbnail(
+                job.id,
+                source_url=job.url,
+                thumbnail_url=metadata.thumbnail if metadata else None,
+                touch=False,
+            )
+
+        # Backfill metadata for other history items sharing the same URL.
+        best_title = None
+        best_thumb_url = None
+        if has_text(job.video_title):
+            best_title = job.video_title
+        if has_text(job.video_thumbnail) and not is_local_thumbnail_for(job, job.video_thumbnail):
+            best_thumb_url = job.video_thumbnail
+        if metadata:
+            if metadata.title:
+                best_title = metadata.title
+            if metadata.thumbnail:
+                best_thumb_url = metadata.thumbnail
+        if fallback_title and not best_title:
+            best_title = fallback_title
+        if fallback_thumb_url and not best_thumb_url:
+            best_thumb_url = fallback_thumb_url
+
+        if best_title or best_thumb_url:
+            for jid in url_job_ids:
+                other = await self.get(jid)
+                if not other or other.status not in {"completed", "failed"}:
+                    continue
+                other_updates = {}
+                if best_title and not has_text(other.video_title):
+                    other_updates["video_title"] = best_title
+                if best_thumb_url and needs_thumbnail(other):
+                    other_updates["video_thumbnail"] = best_thumb_url
+                if other_updates:
+                    await self.update(other.id, **other_updates, touch=False)
+
+        # If we only have a local thumbnail file, copy it to other jobs that need one.
+        if not best_thumb_url:
+            source_thumb = self._thumbnail_path(job.id)
+            if source_thumb:
+                for jid in url_job_ids:
+                    other = await self.get(jid)
+                    if not other or other.id == job.id or other.status not in {"completed", "failed"}:
+                        continue
+                    if not needs_thumbnail(other):
+                        continue
+                    media_dir = self._audio_dir(other.id)
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    for existing in media_dir.glob("thumbnail.*"):
+                        with contextlib.suppress(Exception):
+                            existing.unlink()
+                    dest = media_dir / source_thumb.name
+                    try:
+                        shutil.copy2(source_thumb, dest)
+                        await self.update(other.id, video_thumbnail=self._thumbnail_endpoint(other.id), touch=False)
+                    except Exception:
+                        continue
 
     async def add_thought_summary(self, job_id: str, text: str) -> None:
         cleaned = (text or "").strip()
