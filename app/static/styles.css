@@ -872,10 +872,24 @@ body {
   overflow: hidden;
 }
 
+.history-thumbnail.has-image::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  background-image: var(--thumb-url);
+  background-size: cover;
+  background-position: center;
+  filter: blur(16px) saturate(1.1);
+  transform: scale(1.05);
+  opacity: 0.8;
+}
+
 .history-thumbnail img {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   transition: transform var(--transition-base);
 }
 
@@ -890,6 +904,8 @@ body {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%);
+  position: relative;
+  z-index: 1;
 }
 
 .history-thumbnail-placeholder svg {

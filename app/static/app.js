@@ -1767,6 +1767,8 @@ function renderHistory(items) {
     thumbnail.className = "history-thumbnail";
     
     if (item.video_thumbnail) {
+      thumbnail.classList.add("has-image");
+      thumbnail.style.setProperty("--thumb-url", `url("${item.video_thumbnail}")`);
       const img = document.createElement("img");
       img.src = item.video_thumbnail;
       img.alt = item.video_title || "Video thumbnail";
