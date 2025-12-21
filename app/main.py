@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -83,6 +83,14 @@ async def get_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.get("/api/jobs/{job_id}/thumbnail")
+async def get_job_thumbnail(job_id: str):
+    path = job_store.thumbnail_path(job_id)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return FileResponse(path)
 
 
 @app.get("/api/history", response_model=list[HistoryItem])

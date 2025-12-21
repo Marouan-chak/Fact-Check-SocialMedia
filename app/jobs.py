@@ -14,7 +14,15 @@ from .config import settings
 from .openai_pipeline import fact_check_transcript_stream, transcribe_audio_mp3, translate_report, translate_thought
 from .schemas import FactCheckReport, HistoryItem, Job
 from .storage import read_json, write_json, write_model
-from .ytdlp_audio import DownloadError, download_mp3, get_youtube_transcript, is_youtube_url
+from .ytdlp_audio import (
+    DownloadError,
+    download_mp3,
+    download_thumbnail,
+    download_thumbnail_from_url,
+    get_video_metadata,
+    get_youtube_transcript,
+    is_youtube_url,
+)
 
 
 def _normalize_url(url: str) -> str:
@@ -119,6 +127,17 @@ class JobStore:
     def _audio_dir(self, job_id: str) -> Path:
         return self._job_dir(job_id) / "media"
 
+    def _thumbnail_path(self, job_id: str) -> Optional[Path]:
+        media_dir = self._audio_dir(job_id)
+        if not media_dir.exists():
+            return None
+        candidates = sorted(media_dir.glob("thumbnail.*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def _thumbnail_endpoint(job_id: str) -> str:
+        return f"/api/jobs/{job_id}/thumbnail"
+
     def _cleanup_audio_files(self, job_id: str) -> None:
         """Remove audio files from the media folder to save space after job completion."""
         media_dir = self._audio_dir(job_id)
@@ -139,6 +158,33 @@ class JobStore:
         if segments_dir.exists() and segments_dir.is_dir():
             with contextlib.suppress(Exception):
                 shutil.rmtree(segments_dir)
+
+    async def _cache_thumbnail(self, job_id: str, *, source_url: str, thumbnail_url: Optional[str]) -> None:
+        if not source_url:
+            return
+        existing = self._thumbnail_path(job_id)
+        if existing:
+            job = self._jobs.get(job_id) or self._load_job_from_disk(job_id)
+            if job and job.video_thumbnail == self._thumbnail_endpoint(job_id):
+                return
+            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id))
+            return
+
+        media_dir = self._audio_dir(job_id)
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        path = None
+        if thumbnail_url:
+            path = await asyncio.to_thread(download_thumbnail_from_url, url=thumbnail_url, out_dir=media_dir)
+        if not path:
+            path = await asyncio.to_thread(
+                download_thumbnail,
+                url=source_url,
+                out_dir=media_dir,
+                cookies_file=settings.ytdlp_cookies_file,
+            )
+        if path:
+            await self.update(job_id, video_thumbnail=self._thumbnail_endpoint(job_id))
 
     def _load_job_from_disk(self, job_id: str) -> Optional[Job]:
         data = read_json(self._job_path(job_id))
@@ -261,6 +307,9 @@ class JobStore:
             self._jobs[job_id] = job
         return job
 
+    def thumbnail_path(self, job_id: str) -> Optional[Path]:
+        return self._thumbnail_path(job_id)
+
     async def list_history(self, *, limit: int = 50) -> list[HistoryItem]:
         limit = max(1, min(int(limit or 50), 200))
         if not self.jobs_dir.exists():
@@ -276,8 +325,13 @@ class JobStore:
                 continue
 
             report = data.get("report") if isinstance(data.get("report"), dict) else {}
+            job_id = str(data.get("id") or entry.name)
+            video_thumbnail = data.get("video_thumbnail")
+            if self._thumbnail_path(job_id):
+                video_thumbnail = self._thumbnail_endpoint(job_id)
+
             payload = {
-                "id": data.get("id"),
+                "id": job_id,
                 "url": data.get("url"),
                 "output_language": data.get("output_language") or "ar",
                 "status": data.get("status"),
@@ -286,6 +340,8 @@ class JobStore:
                 "overall_score": report.get("overall_score"),
                 "overall_verdict": report.get("overall_verdict"),
                 "summary": report.get("summary"),
+                "video_title": data.get("video_title"),
+                "video_thumbnail": video_thumbnail,
             }
             try:
                 items.append(HistoryItem.model_validate(payload))
@@ -392,7 +448,11 @@ class JobStore:
             else:
                 await self._run_full_pipeline(job)
         except DownloadError as e:
-            await self.update(job.id, status="failed", progress=100, error=f"Download failed: {e}")
+            error_msg = str(e)
+            # Provide more helpful error for YouTube authentication issues
+            if "Sign in to confirm" in error_msg or "cookies" in error_msg.lower():
+                error_msg = "YouTube requires authentication. Please configure cookies in YTDLP_COOKIES_FILE environment variable. See: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+            await self.update(job.id, status="failed", progress=100, error=error_msg)
         except Exception as e:
             await self.update(job.id, status="failed", progress=100, error=str(e))
         finally:
@@ -407,6 +467,14 @@ class JobStore:
 
         await self.update(job.id, status="translating", progress=0, error=None)
         fake_task = asyncio.create_task(self._fake_progress_translation(job.id))
+
+        # Copy video metadata from source job
+        if source_job.video_title or source_job.video_thumbnail:
+            await self.update(
+                job.id,
+                video_title=source_job.video_title,
+                video_thumbnail=source_job.video_thumbnail,
+            )
 
         # Copy the transcript from source job
         transcript = source_job.transcript
@@ -439,15 +507,30 @@ class JobStore:
         audio_dir = self._audio_dir(job.id)
 
         transcript: Optional[str] = None
+        metadata = None
+        
         if is_youtube_url(job.url):
             await self.update(job.id, status="fetching_transcript", progress=5, error=None)
-            transcript = await asyncio.to_thread(
+            # This single call fetches both transcript and metadata
+            result = await asyncio.to_thread(
                 get_youtube_transcript,
                 url=job.url,
                 out_dir=audio_dir,
                 cookies_file=settings.ytdlp_cookies_file,
                 prefer_original_language=True,
             )
+            transcript = result.transcript
+            metadata = result.metadata
+            
+            # Update metadata if available
+            if metadata and (metadata.title or metadata.thumbnail):
+                await self.update(
+                    job.id,
+                    video_title=metadata.title,
+                    video_thumbnail=metadata.thumbnail,
+                )
+            if metadata and metadata.thumbnail:
+                await self._cache_thumbnail(job.id, source_url=job.url, thumbnail_url=metadata.thumbnail)
 
         if not (transcript or "").strip():
             await self.update(job.id, status="downloading", progress=10, error=None)
@@ -456,6 +539,29 @@ class JobStore:
                 url=job.url,
                 out_dir=audio_dir,
                 cookies_file=settings.ytdlp_cookies_file,
+            )
+            
+            # For non-YouTube or if YouTube transcript failed, try to get metadata now
+            if not metadata or not (metadata.title or metadata.thumbnail):
+                try:
+                    metadata = await asyncio.to_thread(
+                        get_video_metadata,
+                        url=job.url,
+                        cookies_file=settings.ytdlp_cookies_file,
+                    )
+                    if metadata and (metadata.title or metadata.thumbnail):
+                        await self.update(
+                            job.id,
+                            video_title=metadata.title,
+                            video_thumbnail=metadata.thumbnail,
+                        )
+                except Exception:
+                    pass  # Non-critical
+
+            await self._cache_thumbnail(
+                job.id,
+                source_url=job.url,
+                thumbnail_url=metadata.thumbnail if metadata else None,
             )
 
             await self.update(job.id, status="transcribing", progress=20)

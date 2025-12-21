@@ -20,6 +20,7 @@ const els = {
   historyCard: document.getElementById("historyCard"),
   historyRefresh: document.getElementById("historyRefresh"),
   historyList: document.getElementById("historyList"),
+  historySearch: document.getElementById("historySearch"),
 
   statusCard: document.getElementById("statusCard"),
   statusText: document.getElementById("statusText"),
@@ -1703,101 +1704,213 @@ function formatWhen(iso) {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
 }
 
+function formatTimeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString();
+}
+
+function extractDomain(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function renderHistory(items) {
   if (!els.historyList) return;
   els.historyList.innerHTML = "";
   
+  // Clear search input when re-rendering
+  if (els.historySearch) {
+    els.historySearch.value = "";
+  }
+  
   if (!items || items.length === 0) {
     const empty = document.createElement("div");
-    empty.style.padding = "40px 20px";
-    empty.style.textAlign = "center";
-    empty.style.color = "var(--text-muted)";
+    empty.className = "history-empty";
     empty.innerHTML = `
-      <svg style="width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.5;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="12" cy="12" r="10"/>
-        <polyline points="12,6 12,12 16,14"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <polyline points="21 15 16 10 5 21"/>
       </svg>
-      <p style="margin: 0; font-size: 14px;">No analyses yet. Start by analyzing a video!</p>
+      <p>No analyses yet. Start by analyzing a video!</p>
     `;
     els.historyList.appendChild(empty);
     return;
   }
 
   items.forEach((item, index) => {
-    const row = document.createElement("div");
-    row.className = "history-item";
-    row.style.animationDelay = `${index * 0.05}s`;
+    const card = document.createElement("div");
+    card.className = "history-item";
+    card.style.animationDelay = `${index * 0.04}s`;
+    card.dataset.title = (item.video_title || "").toLowerCase();
+    card.dataset.url = (item.url || "").toLowerCase();
 
-    const score = typeof item.overall_score === "number" ? item.overall_score : null;
-    const scoreEl = document.createElement("div");
-    scoreEl.className = "history-score";
-    if (score !== null) {
-      scoreEl.style.color = scoreColor(score);
-      scoreEl.textContent = `${score}%`;
+    // Thumbnail section
+    const thumbnail = document.createElement("div");
+    thumbnail.className = "history-thumbnail";
+    
+    if (item.video_thumbnail) {
+      const img = document.createElement("img");
+      img.src = item.video_thumbnail;
+      img.alt = item.video_title || "Video thumbnail";
+      img.loading = "lazy";
+      img.onerror = () => {
+        img.style.display = "none";
+        const placeholder = document.createElement("div");
+        placeholder.className = "history-thumbnail-placeholder";
+        placeholder.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+            <line x1="7" y1="2" x2="7" y2="22"/>
+            <line x1="17" y1="2" x2="17" y2="22"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <line x1="2" y1="7" x2="7" y2="7"/>
+            <line x1="2" y1="17" x2="7" y2="17"/>
+            <line x1="17" y1="17" x2="22" y2="17"/>
+            <line x1="17" y1="7" x2="22" y2="7"/>
+          </svg>
+        `;
+        thumbnail.appendChild(placeholder);
+      };
+      thumbnail.appendChild(img);
     } else {
-      scoreEl.style.color = "var(--text-muted)";
-      scoreEl.textContent = "—";
+      const placeholder = document.createElement("div");
+      placeholder.className = "history-thumbnail-placeholder";
+      placeholder.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+          <line x1="7" y1="2" x2="7" y2="22"/>
+          <line x1="17" y1="2" x2="17" y2="22"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <line x1="2" y1="7" x2="7" y2="7"/>
+          <line x1="2" y1="17" x2="7" y2="17"/>
+          <line x1="17" y1="17" x2="22" y2="17"/>
+          <line x1="17" y1="7" x2="22" y2="7"/>
+        </svg>
+      `;
+      thumbnail.appendChild(placeholder);
     }
 
-    const meta = document.createElement("div");
-    meta.className = "history-meta";
-    
-    const url = document.createElement("div");
-    url.className = "history-url";
-    url.textContent = item.url || "";
-    url.title = item.url || "";
-    
+    // Score overlay on thumbnail
+    const score = typeof item.overall_score === "number" ? item.overall_score : null;
+    if (score !== null) {
+      const scoreOverlay = document.createElement("div");
+      scoreOverlay.className = "history-score-overlay";
+      scoreOverlay.style.color = scoreColor(score);
+      scoreOverlay.textContent = `${score}%`;
+      thumbnail.appendChild(scoreOverlay);
+    }
+
+    // Content section
+    const content = document.createElement("div");
+    content.className = "history-content";
+
+    const title = document.createElement("div");
+    title.className = "history-title";
+    title.textContent = item.video_title || extractDomain(item.url) || "Untitled";
+    title.title = item.video_title || item.url || "";
+
+    const urlEl = document.createElement("div");
+    urlEl.className = "history-url";
+    urlEl.textContent = item.url || "";
+    urlEl.title = item.url || "";
+
+    // Footer with badges and open button
+    const footer = document.createElement("div");
+    footer.className = "history-footer";
+
     const badges = document.createElement("div");
     badges.className = "history-badges";
-    
+
+    // Verdict badge (if available)
+    if (item.overall_verdict) {
+      const verdictBadge = document.createElement("span");
+      const verdictClass = item.overall_verdict.toLowerCase().replace(/_/g, "_");
+      verdictBadge.className = `badge badge-verdict badge-verdict_${verdictClass}`;
+      verdictBadge.textContent = humanizeEnum(item.overall_verdict);
+      badges.appendChild(verdictBadge);
+    }
+
     const langBadge = document.createElement("span");
     langBadge.className = "badge";
     langBadge.textContent = (item.output_language || "ar").toUpperCase();
-    
-    const statusBadge = document.createElement("span");
-    statusBadge.className = "badge";
-    statusBadge.textContent = humanizeEnum(item.status) || "";
-    
+    badges.appendChild(langBadge);
+
     const timeBadge = document.createElement("span");
     timeBadge.className = "badge";
-    timeBadge.textContent = formatWhen(item.updated_at);
-    
-    badges.appendChild(langBadge);
-    badges.appendChild(statusBadge);
+    timeBadge.textContent = formatTimeAgo(item.updated_at);
     badges.appendChild(timeBadge);
-    meta.appendChild(url);
-    meta.appendChild(badges);
 
-    const actions = document.createElement("div");
     const openBtn = document.createElement("button");
     openBtn.type = "button";
-    openBtn.className = "btn btn-ghost btn-sm";
-    openBtn.innerHTML = `
-      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-        <polyline points="15 3 21 3 21 9"/>
-        <line x1="10" y1="14" x2="21" y2="3"/>
-      </svg>
-      Open
-    `;
-    openBtn.addEventListener("click", async () => {
+    openBtn.className = "history-open-btn";
+    openBtn.textContent = "Open";
+    openBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       try {
         openBtn.disabled = true;
         await loadJobPage(item.id, { navigate: true });
         if (els.forceRun) els.forceRun.checked = false;
         setHidden(els.historyCard, true);
-      } catch (e) {
-        showAlert(els.errorBox, e?.message || String(e));
+      } catch (err) {
+        showAlert(els.errorBox, err?.message || String(err));
       } finally {
         openBtn.disabled = false;
       }
     });
-    actions.appendChild(openBtn);
 
-    row.appendChild(scoreEl);
-    row.appendChild(meta);
-    row.appendChild(actions);
-    els.historyList.appendChild(row);
+    footer.appendChild(badges);
+    footer.appendChild(openBtn);
+
+    content.appendChild(title);
+    content.appendChild(urlEl);
+    content.appendChild(footer);
+
+    card.appendChild(thumbnail);
+    card.appendChild(content);
+
+    // Click entire card to open
+    card.addEventListener("click", async () => {
+      try {
+        await loadJobPage(item.id, { navigate: true });
+        if (els.forceRun) els.forceRun.checked = false;
+        setHidden(els.historyCard, true);
+      } catch (err) {
+        showAlert(els.errorBox, err?.message || String(err));
+      }
+    });
+
+    els.historyList.appendChild(card);
+  });
+}
+
+function filterHistory(query) {
+  if (!els.historyList) return;
+  const q = (query || "").toLowerCase().trim();
+  const items = els.historyList.querySelectorAll(".history-item");
+  
+  items.forEach((item) => {
+    const title = item.dataset.title || "";
+    const url = item.dataset.url || "";
+    const matches = !q || title.includes(q) || url.includes(q);
+    item.classList.toggle("hidden", !matches);
   });
 }
 
@@ -2060,6 +2173,11 @@ els.historyRefresh?.addEventListener("click", async () => {
   if (icon) icon.style.animation = 'spin 0.5s linear';
   await loadHistory();
   if (icon) setTimeout(() => icon.style.animation = '', 500);
+});
+
+// History search
+els.historySearch?.addEventListener("input", (e) => {
+  filterHistory(e.target.value);
 });
 
 els.tabClaims?.addEventListener("click", () => setDetailsTab("claims"));

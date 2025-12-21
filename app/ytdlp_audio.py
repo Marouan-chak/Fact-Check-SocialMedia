@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import mimetypes
 import re
 import shutil
 import subprocess
+import urllib.request
 from html import unescape
 from pathlib import Path
 from typing import Any, Optional
@@ -84,6 +87,66 @@ def _dedupe_repeated_blocks(text: str) -> str:
     return joined
 
 
+class VideoMetadata:
+    """Simple container for video metadata."""
+    def __init__(self, title: Optional[str] = None, thumbnail: Optional[str] = None):
+        self.title = title
+        self.thumbnail = thumbnail
+
+
+def _extract_metadata_from_info(info: dict[str, Any]) -> VideoMetadata:
+    """Extract metadata from yt-dlp info dict."""
+    if not isinstance(info, dict):
+        return VideoMetadata()
+    
+    title = info.get("title") or info.get("fulltitle")
+    
+    # Get the best thumbnail URL
+    thumbnail = info.get("thumbnail")
+    if not thumbnail:
+        thumbnails = info.get("thumbnails")
+        if isinstance(thumbnails, list) and thumbnails:
+            # Prefer higher resolution thumbnails
+            best = None
+            best_res = 0
+            for t in thumbnails:
+                if not isinstance(t, dict):
+                    continue
+                url_t = t.get("url")
+                if not url_t:
+                    continue
+                width = t.get("width", 0) or 0
+                height = t.get("height", 0) or 0
+                res = width * height
+                if res > best_res or best is None:
+                    best = url_t
+                    best_res = res
+            thumbnail = best
+    
+    return VideoMetadata(
+        title=str(title).strip() if title else None,
+        thumbnail=str(thumbnail).strip() if thumbnail else None,
+    )
+
+
+def get_video_metadata(*, url: str, cookies_file: Optional[Path] = None) -> VideoMetadata:
+    """
+    Fetch video metadata (title, thumbnail) using yt-dlp.
+    Returns a VideoMetadata object with available fields.
+    Note: For YouTube, prefer using get_youtube_transcript which returns metadata
+    from the same call to avoid duplicate requests triggering bot detection.
+    """
+    url = (url or "").strip()
+    if not url:
+        return VideoMetadata()
+
+    try:
+        info = _ytdlp_dump_json(url=url, cookies_file=cookies_file)
+        return _extract_metadata_from_info(info)
+    except Exception:
+        return VideoMetadata()
+
+
 def is_youtube_url(url: str) -> bool:
     url = (url or "").strip()
     if not url:
@@ -100,6 +163,93 @@ def is_youtube_url(url: str) -> bool:
     if ":" in host:
         host = host.split(":", 1)[0]
     return host.endswith("youtube.com") or host.endswith("youtu.be") or host.endswith("youtube-nocookie.com")
+
+
+def _guess_thumbnail_extension(url: str, content_type: Optional[str]) -> str:
+    if content_type:
+        guessed = mimetypes.guess_extension(content_type.split(";", 1)[0].strip())
+        if guessed:
+            return guessed
+    try:
+        ext = Path(urlparse(url).path).suffix
+    except Exception:
+        ext = ""
+    if ext and len(ext) <= 5:
+        return ext
+    return ".jpg"
+
+
+def _clear_existing_thumbnails(out_dir: Path) -> None:
+    for existing in out_dir.glob("thumbnail.*"):
+        with contextlib.suppress(Exception):
+            existing.unlink()
+
+
+def download_thumbnail_from_url(*, url: str, out_dir: Path) -> Optional[Path]:
+    """
+    Download a thumbnail image from a direct URL and store as thumbnail.<ext>.
+    Returns the saved path if successful.
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = resp.read()
+            content_type = resp.headers.get_content_type()
+    except Exception:
+        return None
+
+    if not data:
+        return None
+
+    ext = _guess_thumbnail_extension(url, content_type)
+    _clear_existing_thumbnails(out_dir)
+    path = out_dir / f"thumbnail{ext}"
+    try:
+        path.write_bytes(data)
+    except Exception:
+        return None
+    return path
+
+
+def download_thumbnail(*, url: str, out_dir: Path, cookies_file: Optional[Path] = None) -> Optional[Path]:
+    """
+    Download a thumbnail image via yt-dlp and store as thumbnail.<ext>.
+    Returns the saved path if successful.
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    _clear_existing_thumbnails(out_dir)
+    outtmpl = str(out_dir / "thumbnail.%(ext)s")
+    cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "--skip-download",
+        "--write-thumbnail",
+        "--write-all-thumbnails",
+        "--remote-components", "ejs:github",
+        "-o",
+        outtmpl,
+        url,
+    ]
+    if cookies_file:
+        cmd[1:1] = ["--cookies", str(cookies_file)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+
+    candidates = sorted(out_dir.glob("thumbnail.*"), key=lambda p: p.stat().st_size, reverse=True)
+    return candidates[0] if candidates else None
 
 
 def _clean_subtitle_text(text: str) -> str:
@@ -148,7 +298,13 @@ def _clean_subtitle_text(text: str) -> str:
 
 
 def _ytdlp_dump_json(*, url: str, cookies_file: Optional[Path] = None) -> dict[str, Any]:
-    cmd = ["yt-dlp", "--no-playlist", "--dump-single-json", url]
+    cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "--dump-single-json",
+        "--remote-components", "ejs:github",  # Enable JS challenge solver
+        url,
+    ]
     if cookies_file:
         cmd[1:1] = ["--cookies", str(cookies_file)]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -210,6 +366,7 @@ def _download_subtitles_file(
         "yt-dlp",
         "--no-playlist",
         "--skip-download",
+        "--remote-components", "ejs:github",  # Enable JS challenge solver
         "--sub-langs",
         str(lang),
         "--sub-format",
@@ -257,6 +414,13 @@ def _download_subtitles_file(
     return preferred[0]
 
 
+class TranscriptResult:
+    """Container for transcript and metadata from YouTube."""
+    def __init__(self, transcript: Optional[str] = None, metadata: Optional[VideoMetadata] = None):
+        self.transcript = transcript
+        self.metadata = metadata or VideoMetadata()
+
+
 def get_youtube_transcript(
     *,
     url: str,
@@ -264,17 +428,19 @@ def get_youtube_transcript(
     preferred_langs: Optional[list[str]] = None,
     cookies_file: Optional[Path] = None,
     prefer_original_language: bool = True,
-) -> Optional[str]:
+) -> TranscriptResult:
     """
     Best-effort YouTube transcript fetch via yt-dlp subtitles (manual preferred, then auto captions).
-    Returns plain text transcript, or None if unavailable.
+    Returns TranscriptResult containing transcript (or None) and video metadata.
     """
     url = (url or "").strip()
     if not url or not is_youtube_url(url):
-        return None
+        return TranscriptResult()
 
     try:
         info = _ytdlp_dump_json(url=url, cookies_file=cookies_file)
+        metadata = _extract_metadata_from_info(info)
+        
         subtitles = info.get("subtitles") if isinstance(info.get("subtitles"), dict) else {}
         auto_caps = info.get("automatic_captions") if isinstance(info.get("automatic_captions"), dict) else {}
 
@@ -283,7 +449,7 @@ def get_youtube_transcript(
         if prefer_original_language:
             # We only want the video's original language transcript/captions (not a translated track).
             if not vid_lang:
-                return None
+                return TranscriptResult(transcript=None, metadata=metadata)
             prefs.append(vid_lang)
         else:
             if preferred_langs:
@@ -296,17 +462,19 @@ def get_youtube_transcript(
             lang = _pick_sub_lang(subtitles, prefs)
             if lang:
                 path = _download_subtitles_file(url=url, out_dir=out_dir, lang=lang, auto=False, cookies_file=cookies_file)
-                return _clean_subtitle_text(path.read_text(encoding="utf-8", errors="replace"))
+                transcript = _clean_subtitle_text(path.read_text(encoding="utf-8", errors="replace"))
+                return TranscriptResult(transcript=transcript, metadata=metadata)
 
         if isinstance(auto_caps, dict) and auto_caps:
             lang = _pick_sub_lang(auto_caps, prefs)
             if lang:
                 path = _download_subtitles_file(url=url, out_dir=out_dir, lang=lang, auto=True, cookies_file=cookies_file)
-                return _clean_subtitle_text(path.read_text(encoding="utf-8", errors="replace"))
+                transcript = _clean_subtitle_text(path.read_text(encoding="utf-8", errors="replace"))
+                return TranscriptResult(transcript=transcript, metadata=metadata)
+        
+        return TranscriptResult(transcript=None, metadata=metadata)
     except Exception:
-        return None
-
-    return None
+        return TranscriptResult()
 
 
 def download_mp3(*, url: str, out_dir: Path, cookies_file: Optional[Path] = None) -> Path:
@@ -323,6 +491,7 @@ def download_mp3(*, url: str, out_dir: Path, cookies_file: Optional[Path] = None
     cmd = [
         "yt-dlp",
         "--no-playlist",
+        "--remote-components", "ejs:github",  # Enable JS challenge solver
         "-x",
         "--audio-format",
         "mp3",

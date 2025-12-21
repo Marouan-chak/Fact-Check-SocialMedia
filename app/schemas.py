@@ -105,6 +105,9 @@ class Job(BaseModel):
     # For translation jobs: reference to the source job being translated
     translate_from_job_id: Optional[str] = Field(None, description="If set, this job translates from another job's report.")
     thought_summaries: List[str] = Field(default_factory=list, description="Incremental thought/reasoning summaries emitted while fact-checking.")
+    # Video metadata
+    video_title: Optional[str] = Field(None, description="Title of the video from the platform.")
+    video_thumbnail: Optional[str] = Field(None, description="URL to the video thumbnail image.")
 
 
 class HistoryItem(BaseModel):
@@ -117,3 +120,5 @@ class HistoryItem(BaseModel):
     overall_score: Optional[int] = None
     overall_verdict: Optional[OverallVerdict] = None
     summary: Optional[str] = None
+    video_title: Optional[str] = None
+    video_thumbnail: Optional[str] = None

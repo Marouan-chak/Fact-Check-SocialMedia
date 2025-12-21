@@ -6,14 +6,14 @@ End-to-end platform to fact-check social media video audio (Instagram, YouTube, 
 If you pasted an OpenAI API key into chat, assume it is compromised and **rotate it immediately** in the OpenAI dashboard.
 
 ## Prereqs
-- Python 3.10+
+- Python 3.10–3.13 (avoid Python 3.14 beta – it has breaking changes)
 - `ffmpeg` (required by `yt-dlp` for MP3 extraction when captions aren't available)
   - macOS: `brew install ffmpeg`
 
 ## Setup
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv venv312
+source venv312/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
