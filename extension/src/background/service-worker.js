@@ -50,8 +50,13 @@ async function initialize() {
       [MESSAGE_TYPES.GET_CACHED_RESULT]: handleGetCachedResult,
       [MESSAGE_TYPES.GET_SETTINGS]: handleGetSettings,
       [MESSAGE_TYPES.OPEN_SIDE_PANEL]: handleOpenSidePanel,
+      [MESSAGE_TYPES.SETTINGS_UPDATED]: handleSettingsUpdated,
     })
   );
+
+  // Set icon badge based on enabled state
+  const settings = await getSettings();
+  updateGlobalBadge(settings.enabled !== false);
 
   // Handle tab removal
   chrome.tabs.onRemoved.addListener(handleTabRemoved);
@@ -172,6 +177,48 @@ async function handleOpenSidePanel(data = {}, sender) {
   }
 
   return { success: true };
+}
+
+/**
+ * Handle settings updated (enable/disable toggle)
+ */
+async function handleSettingsUpdated(data) {
+  const { enabled } = data;
+
+  console.log(`[VerifyAI] Settings updated - enabled: ${enabled}`);
+
+  // Update global badge
+  updateGlobalBadge(enabled);
+
+  // Broadcast to all content scripts
+  try {
+    const tabs = await queryTabs({});
+    for (const tab of tabs) {
+      if (tab.id) {
+        try {
+          await sendToTab(tab.id, MESSAGE_TYPES.SETTINGS_UPDATED, { enabled });
+        } catch {
+          // Tab might not have content script, ignore
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[VerifyAI] Error broadcasting settings update:', error);
+  }
+
+  return { success: true };
+}
+
+/**
+ * Update global badge based on enabled state
+ */
+function updateGlobalBadge(isEnabled) {
+  if (isEnabled) {
+    chrome.action.setBadgeText({ text: '' });
+  } else {
+    chrome.action.setBadgeText({ text: 'OFF' });
+    chrome.action.setBadgeBackgroundColor({ color: '#71717a' });
+  }
 }
 
 /**

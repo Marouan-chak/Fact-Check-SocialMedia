@@ -18,6 +18,9 @@ import {
 
 // DOM elements
 const els = {
+  popup: document.querySelector('.popup'),
+  enabledToggle: document.getElementById('enabledToggle'),
+
   notVideoPage: document.getElementById('notVideoPage'),
   videoDetected: document.getElementById('videoDetected'),
   analysisProgress: document.getElementById('analysisProgress'),
@@ -63,6 +66,12 @@ async function initialize() {
   backendUrl = settings.backendUrl;
   els.languageSelect.value = settings.language || 'en';
 
+  // Set enabled toggle state
+  const isEnabled = settings.enabled !== false; // Default to true
+  els.enabledToggle.checked = isEnabled;
+  updateEnabledState(isEnabled);
+  updateExtensionIcon(isEnabled);
+
   // Set up event listeners
   setupEventListeners();
 
@@ -77,6 +86,7 @@ async function initialize() {
  * Set up event listeners
  */
 function setupEventListeners() {
+  els.enabledToggle?.addEventListener('change', handleEnabledToggle);
   els.factCheckBtn?.addEventListener('click', handleFactCheck);
   els.openPanelBtn?.addEventListener('click', handleOpenPanel);
   els.viewResultsBtn?.addEventListener('click', handleViewResults);
@@ -402,6 +412,63 @@ function handleOptions() {
     window.open('src/options/options.html', '_blank');
   }
   window.close();
+}
+
+/**
+ * Handle enabled toggle change
+ */
+async function handleEnabledToggle() {
+  const isEnabled = els.enabledToggle.checked;
+
+  // Save to settings
+  await saveSettings({ enabled: isEnabled });
+
+  // Update UI state
+  updateEnabledState(isEnabled);
+
+  // Update extension icon
+  updateExtensionIcon(isEnabled);
+
+  // Notify background script to update all tabs
+  try {
+    await sendToBackground(MESSAGE_TYPES.SETTINGS_UPDATED, { enabled: isEnabled });
+  } catch (error) {
+    console.warn('[VerifyAI] Could not notify background script:', error);
+  }
+}
+
+/**
+ * Update UI based on enabled state
+ */
+function updateEnabledState(isEnabled) {
+  if (isEnabled) {
+    els.popup?.classList.remove('disabled');
+  } else {
+    els.popup?.classList.add('disabled');
+  }
+}
+
+/**
+ * Update extension icon based on enabled state
+ */
+function updateExtensionIcon(isEnabled) {
+  // Set badge to indicate disabled state
+  if (extensionApi?.action?.setBadgeText) {
+    extensionApi.action.setBadgeText({
+      text: isEnabled ? '' : 'OFF',
+    });
+    extensionApi.action.setBadgeBackgroundColor({
+      color: '#71717a',
+    });
+  } else if (extensionApi?.browserAction?.setBadgeText) {
+    // Firefox uses browserAction
+    extensionApi.browserAction.setBadgeText({
+      text: isEnabled ? '' : 'OFF',
+    });
+    extensionApi.browserAction.setBadgeBackgroundColor({
+      color: '#71717a',
+    });
+  }
 }
 
 // Initialize on load

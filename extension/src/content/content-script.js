@@ -18,6 +18,8 @@ class ContentScript {
     // Support multiple badges for feed scrolling
     this.badges = new Map(); // postId -> { badge, video, url }
     this.jobs = new Map(); // postId -> job info
+    // Extension enabled state
+    this.isEnabled = true;
   }
 
   /**
@@ -25,6 +27,23 @@ class ContentScript {
    */
   async initialize() {
     console.log('[VerifyAI] Content script initializing...');
+
+    // Always set up message listener first (to receive enable/disable messages)
+    this.setupMessageListener();
+
+    // Check if extension is enabled
+    try {
+      const settings = await sendToBackground(MESSAGE_TYPES.GET_SETTINGS);
+      this.isEnabled = settings?.enabled !== false;
+    } catch (error) {
+      console.warn('[VerifyAI] Could not get settings, defaulting to enabled');
+      this.isEnabled = true;
+    }
+
+    if (!this.isEnabled) {
+      console.log('[VerifyAI] Extension is disabled');
+      return;
+    }
 
     // Detect platform
     this.platform = detectPlatform();
@@ -35,9 +54,6 @@ class ContentScript {
     }
 
     console.log(`[VerifyAI] Detected platform: ${this.platform.name}`);
-
-    // Set up message listener
-    this.setupMessageListener();
 
     // Start observing for video changes
     this.cleanupFn = this.platform.observeChanges((videoInfo) => {
@@ -63,7 +79,78 @@ class ContentScript {
         case MESSAGE_TYPES.JOB_FAILED:
           this.handleJobFailed(message.error, message.jobId);
           break;
+        case MESSAGE_TYPES.SETTINGS_UPDATED:
+          this.handleSettingsUpdated(message);
+          break;
       }
+    });
+  }
+
+  /**
+   * Handle settings updated (enable/disable toggle)
+   */
+  handleSettingsUpdated(message) {
+    const wasEnabled = this.isEnabled;
+    this.isEnabled = message.enabled !== false;
+
+    console.log(`[VerifyAI] Extension ${this.isEnabled ? 'enabled' : 'disabled'}`);
+
+    if (wasEnabled && !this.isEnabled) {
+      // Was enabled, now disabled - hide all badges
+      this.hideAllBadges();
+    } else if (!wasEnabled && this.isEnabled) {
+      // Was disabled, now enabled - reinitialize
+      this.reinitialize();
+    }
+  }
+
+  /**
+   * Hide all badges (when extension is disabled)
+   */
+  hideAllBadges() {
+    // Hide single badge
+    if (this.badge) {
+      this.badge.remove();
+      this.badge = null;
+    }
+
+    // Hide all multi-video badges
+    for (const [postId, badgeInfo] of this.badges) {
+      if (badgeInfo.badge) {
+        badgeInfo.badge.remove();
+      }
+      if (this.platform?.unregisterBadge && badgeInfo.video) {
+        this.platform.unregisterBadge(badgeInfo.video);
+      }
+    }
+    this.badges.clear();
+
+    // Stop observing
+    if (this.cleanupFn) {
+      this.cleanupFn();
+      this.cleanupFn = null;
+    }
+  }
+
+  /**
+   * Reinitialize when re-enabled
+   */
+  async reinitialize() {
+    // Detect platform if not already
+    if (!this.platform) {
+      this.platform = detectPlatform();
+    }
+
+    if (!this.platform) {
+      console.log('[VerifyAI] Not a supported video page');
+      return;
+    }
+
+    console.log(`[VerifyAI] Reinitializing for platform: ${this.platform.name}`);
+
+    // Start observing for video changes
+    this.cleanupFn = this.platform.observeChanges((videoInfo) => {
+      this.handleVideoChange(videoInfo);
     });
   }
 

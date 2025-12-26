@@ -160,6 +160,7 @@ export function getVerdictColor(verdict) {
 export const RTL_LANGUAGES = new Set(['ar', 'fa', 'he', 'ur']);
 
 export const DEFAULT_SETTINGS = {
+  enabled: true, // Master toggle for the extension
   backendMode: 'self-hosted',
   backendUrl: 'http://localhost:8000',
   language: 'en',
