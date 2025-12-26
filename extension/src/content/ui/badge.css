@@ -318,11 +318,21 @@
   bottom: 120px;
 }
 
-/* Instagram */
+/* Instagram - overlay on video */
 .verifyai-badge[data-platform="instagram"] {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  position: absolute !important;
+  top: 12px !important;
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  pointer-events: auto;
+}
+
+/* Instagram - ensure badge stays visible over video */
+.verifyai-badge[data-platform="instagram"] .verifyai-badge-inner {
+  background: rgba(24, 24, 27, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* TikTok */
@@ -332,16 +342,38 @@
   right: 12px;
 }
 
-/* Twitter */
+/* Twitter/X - overlay on video */
 .verifyai-badge[data-platform="twitter"] {
-  margin: 8px 0;
+  position: absolute !important;
+  top: 12px !important;
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  pointer-events: auto;
 }
 
-/* Facebook */
+/* Twitter - ensure badge stays visible over video */
+.verifyai-badge[data-platform="twitter"] .verifyai-badge-inner {
+  background: rgba(24, 24, 27, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Facebook - overlay on video */
 .verifyai-badge[data-platform="facebook"] {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  position: absolute !important;
+  top: 12px !important;
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  pointer-events: auto;
+}
+
+/* Facebook - ensure badge stays visible over video */
+.verifyai-badge[data-platform="facebook"] .verifyai-badge-inner {
+  background: rgba(24, 24, 27, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* Dark mode adjustments (most video platforms are dark) */

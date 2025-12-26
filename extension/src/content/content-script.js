@@ -15,6 +15,9 @@ class ContentScript {
     this.currentUrl = null;
     this.currentJob = null;
     this.cleanupFn = null;
+    // Support multiple badges for feed scrolling
+    this.badges = new Map(); // postId -> { badge, video, url }
+    this.jobs = new Map(); // postId -> job info
   }
 
   /**
@@ -58,7 +61,7 @@ class ContentScript {
           this.handleJobCompleted(message.job);
           break;
         case MESSAGE_TYPES.JOB_FAILED:
-          this.handleJobFailed(message.error);
+          this.handleJobFailed(message.error, message.jobId);
           break;
       }
     });
@@ -70,6 +73,13 @@ class ContentScript {
   async handleVideoChange(videoInfo) {
     console.log('[VerifyAI] Video detected:', videoInfo);
 
+    // Multi-video mode (feed scrolling)
+    if (videoInfo.isMultiVideo && videoInfo.video && videoInfo.container) {
+      await this.handleMultiVideoChange(videoInfo);
+      return;
+    }
+
+    // Single video mode (direct URL)
     // Remove existing badge
     if (this.badge) {
       this.badge.remove();
@@ -114,6 +124,104 @@ class ContentScript {
     // Show cached result if available
     if (cachedResult && cachedResult.status === JOB_STATUSES.COMPLETED) {
       this.badge.showResult(cachedResult.report);
+    }
+  }
+
+  /**
+   * Handle multi-video mode (feed scrolling with multiple videos)
+   */
+  async handleMultiVideoChange(videoInfo) {
+    const { video, container, url, postId } = videoInfo;
+
+    // Skip if already have a badge for this video
+    if (this.badges.has(postId)) {
+      return;
+    }
+
+    // Check if platform tracks this video
+    if (this.platform.hasBadge && this.platform.hasBadge(video)) {
+      return;
+    }
+
+    console.log('[VerifyAI] Adding badge for video:', postId);
+
+    // Check for cached result
+    let cachedResult = null;
+    try {
+      cachedResult = await sendToBackground(MESSAGE_TYPES.GET_CACHED_RESULT, {
+        url: url,
+      });
+    } catch (error) {
+      console.warn('[VerifyAI] Error checking cache:', error);
+    }
+
+    // Ensure container has position relative for absolute positioning
+    const containerStyle = window.getComputedStyle(container);
+    if (containerStyle.position === 'static') {
+      container.style.position = 'relative';
+    }
+
+    const position = this.platform.getBadgePosition();
+
+    const badge = new Badge({
+      container,
+      position,
+      platform: this.platform.id,
+      onFactCheck: () => this.startFactCheckForVideo(postId, url),
+      onOpenPanel: () => this.openSidePanel(),
+    });
+
+    badge.inject();
+
+    // Register with platform
+    if (this.platform.registerBadge) {
+      this.platform.registerBadge(video, badge);
+    }
+
+    // Store badge info
+    this.badges.set(postId, { badge, video, url });
+
+    // Show cached result if available
+    if (cachedResult && cachedResult.status === JOB_STATUSES.COMPLETED) {
+      badge.showResult(cachedResult.report);
+    }
+  }
+
+  /**
+   * Start fact-checking for a specific video (multi-video mode)
+   */
+  async startFactCheckForVideo(postId, url) {
+    const badgeInfo = this.badges.get(postId);
+    if (!badgeInfo) {
+      console.error('[VerifyAI] No badge found for postId:', postId);
+      return;
+    }
+
+    console.log('[VerifyAI] Starting fact check for:', url);
+
+    badgeInfo.badge.setLoading(true);
+
+    try {
+      // Get settings for language
+      const settings = await sendToBackground(MESSAGE_TYPES.GET_SETTINGS);
+      const language = settings?.language || 'en';
+
+      // Start fact check
+      const response = await sendToBackground(MESSAGE_TYPES.START_FACT_CHECK, {
+        url: url,
+        language,
+      });
+
+      // Store job info
+      this.jobs.set(response.job_id, { postId, url });
+
+      if (response.cached && response.job) {
+        // Already have result
+        badgeInfo.badge.showResult(response.job.report);
+      }
+    } catch (error) {
+      console.error('[VerifyAI] Error starting fact check:', error);
+      badgeInfo.badge.showError(error.message);
     }
   }
 
@@ -172,6 +280,21 @@ class ContentScript {
    * Handle job update event
    */
   handleJobUpdate(job) {
+    // Try multi-video mode first
+    const jobInfo = this.jobs.get(job?.id);
+    if (jobInfo) {
+      const badgeInfo = this.badges.get(jobInfo.postId);
+      if (badgeInfo?.badge) {
+        badgeInfo.badge.updateProgress(job.progress, job.status);
+        if (job.thought_summaries?.length > 0) {
+          const latestThought = job.thought_summaries[job.thought_summaries.length - 1];
+          badgeInfo.badge.showThought(latestThought);
+        }
+        return;
+      }
+    }
+
+    // Fallback to single-video mode
     if (this.badge && job) {
       this.badge.updateProgress(job.progress, job.status);
 
@@ -189,6 +312,17 @@ class ContentScript {
   handleJobCompleted(job) {
     console.log('[VerifyAI] Job completed:', job?.id);
 
+    // Try multi-video mode first
+    const jobInfo = this.jobs.get(job?.id);
+    if (jobInfo) {
+      const badgeInfo = this.badges.get(jobInfo.postId);
+      if (badgeInfo?.badge && job?.report) {
+        badgeInfo.badge.showResult(job.report);
+        return;
+      }
+    }
+
+    // Fallback to single-video mode
     if (this.badge && job?.report) {
       this.badge.showResult(job.report);
     }
@@ -197,9 +331,20 @@ class ContentScript {
   /**
    * Handle job failed event
    */
-  handleJobFailed(error) {
+  handleJobFailed(error, jobId) {
     console.log('[VerifyAI] Job failed:', error);
 
+    // Try multi-video mode first
+    const jobInfo = this.jobs.get(jobId);
+    if (jobInfo) {
+      const badgeInfo = this.badges.get(jobInfo.postId);
+      if (badgeInfo?.badge) {
+        badgeInfo.badge.showError(error || 'Analysis failed');
+        return;
+      }
+    }
+
+    // Fallback to single-video mode
     if (this.badge) {
       this.badge.showError(error || 'Analysis failed');
     }
@@ -258,6 +403,17 @@ class ContentScript {
     if (this.badge) {
       this.badge.remove();
     }
+    // Clean up all badges in multi-video mode
+    for (const [postId, badgeInfo] of this.badges) {
+      if (badgeInfo.badge) {
+        badgeInfo.badge.remove();
+      }
+      if (this.platform.unregisterBadge && badgeInfo.video) {
+        this.platform.unregisterBadge(badgeInfo.video);
+      }
+    }
+    this.badges.clear();
+    this.jobs.clear();
   }
 }
 
